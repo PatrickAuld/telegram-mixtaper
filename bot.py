@@ -45,7 +45,6 @@ class PlaylistMaker(object):
     def find_spotify_links(self, bot, update):
         links = self.get_spotify_links(update.message.text)
         if links:
-            bot.send_message(error_channel, 'Adding {count} tracks to playlist'.format(count=len(links)))
             results = self.spotify.user_playlist_add_tracks(self.user_id, self.playlist_id, links, position=0)
             logger.info(results)
 
