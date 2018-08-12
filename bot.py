@@ -16,7 +16,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
                     level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-spotify_link_regex = r".*(https?://open\.spotify\.com(?:[^?\s()<>{}\[\]]+|\([^\s()]*?\([^\s()]+\)[^\s()]*?\)|\([^\s]+?\))+)"
+spotify_link_regex = r".*(https?://open\.spotify\.com/track/(?:[^?\s()<>{}\[\]]+|\([^\s()]*?\([^\s()]+\)[^\s()]*?\)|\([^\s]+?\))+)"
 error_channel = int(os.environ.get('TELEGRAM_ERROR_CHANNEL'))
 
 class PlaylistMaker(object):
