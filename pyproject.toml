@@ -1,0 +1,39 @@
+[project]
+name = "telegram-mixtaper"
+version = "0.1.0"
+description = "Telegram bot that adds Spotify links to a playlist"
+readme = "README.md"
+requires-python = ">=3.8,<3.11"
+authors = [
+  { name = "Telegram Mixtaper Maintainers" }
+]
+dependencies = [
+  "python-telegram-bot==10.1.0",
+  "redis==2.10.6",
+  "requests==2.20",
+  "spotipy==2.4.4",
+  "six==1.11.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pylint==2.7.0",
+  "isort==4.3.4"
+]
+
+[project.scripts]
+telegram-mixtaper = "bot:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["bot", "oauth2"]
+
+[tool.uv]
+package = true
+dev-dependencies = [
+  "pyinstaller>=6.3",
+  "pytest>=7.4"
+]
