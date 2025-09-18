@@ -44,9 +44,45 @@ class PlaylistMaker(object):
 
     def find_spotify_links(self, bot, update):
         links = self.get_spotify_links(update.message.text)
-        if links:
-            results = self.spotify.user_playlist_add_tracks(self.user_id, self.playlist_id, links, position=0)
-            logger.info(results)
+        if not links:
+            return
+
+        added_tracks = []
+        chat_id = update.message.chat_id
+
+        for link in links:
+            try:
+                track = self.spotify.track(link)
+            except Exception:
+                logger.exception("Unable to fetch metadata for link %s", link)
+                continue
+
+            artist_names = ", ".join(artist["name"] for artist in track.get("artists", []))
+            track_name = track.get("name", "Unknown track")
+            caption_lines = [f"{artist_names} - {track_name}", link]
+
+            image_url = None
+            images = track.get("album", {}).get("images", [])
+            if images:
+                # Pick the first image, which is the largest
+                image_url = images[0].get("url")
+
+            try:
+                if image_url:
+                    bot.send_photo(chat_id=chat_id, photo=image_url, caption="\n".join(caption_lines))
+                else:
+                    bot.send_message(chat_id=chat_id, text="\n".join(caption_lines))
+            except Exception:
+                logger.exception("Unable to send message for track %s", link)
+
+            added_tracks.append(link)
+
+        if added_tracks:
+            try:
+                results = self.spotify.user_playlist_add_tracks(self.user_id, self.playlist_id, added_tracks, position=0)
+                logger.info(results)
+            except Exception:
+                logger.exception("Unable to add tracks to playlist")
 
 
 def error(bot, update, error):
