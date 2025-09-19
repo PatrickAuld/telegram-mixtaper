@@ -49,17 +49,25 @@ The bot requires these environment variables:
 ## Development
 
 ### Dependencies
-Key dependencies from `requirements.txt`:
-- `python-telegram-bot==10.1.0` - Telegram bot framework (⚠️ LEGACY VERSION)
-- `spotipy==2.4.4` - Spotify Web API wrapper
-- `redis==2.10.6` - Redis client for token storage
+Updated dependencies from `requirements.txt`:
+- `python-telegram-bot[webhooks]==22.3` - Latest async Telegram bot framework
+- `spotipy>=2.24.0` - Updated Spotify Web API wrapper
+- `redis>=5.0.0` - Modern Redis client
+- `fastapi>=0.104.0` - Fast async web framework for webhooks
+- `uvicorn>=0.24.0` - ASGI server for production deployment
 
-### ⚠️ Modernization Notes
-The current codebase uses python-telegram-bot v10.1.0, which is significantly outdated. The latest version (v22.3+) introduced major breaking changes:
-- **Async/await required**: The library is now fully async (requires code rewrite)
-- **Context-based API**: Handler API has changed completely
-- **Python 3.9+ required**: Older Python versions no longer supported
-- Consider upgrading when development time allows
+### ✅ Modernization Complete
+The codebase has been updated to use the latest versions:
+- **Python 3.13**: Latest stable Python version
+- **python-telegram-bot v22.3**: Latest async library with webhook support
+- **FastAPI**: Modern async web framework for webhook handling
+- **Updated dependencies**: All packages updated to latest compatible versions
+
+#### Key Changes Made:
+- **Async/await patterns**: All bot handlers now use async/await
+- **FastAPI webhook server**: Replaced built-in webhook with FastAPI
+- **Modern Redis compatibility**: Updated for redis-py 5.0+
+- **Improved error handling**: Better async error handling and reporting
 
 ### Local Development
 ```bash
@@ -69,22 +77,25 @@ pip install -r requirements.txt
 # Set environment variables (create .env file)
 export TELEGRAM_BOT_TOKEN="your_bot_token"
 export SPOTIFY_CLIENT_ID="your_client_id"
+export USE_POLLING="true"  # For local development
 # ... other env vars
 
-# Run the bot
+# Run the bot (polling mode for local development)
 python bot.py
 ```
 
 ### Testing
-The bot uses webhook mode for production deployment. For local testing, you may want to switch to polling mode by modifying the `main()` function in `bot.py:93-100`.
+- **Production**: Uses FastAPI webhook server with uvicorn
+- **Local Development**: Set `USE_POLLING=true` to use polling mode instead of webhooks
+- **Health Check**: GET `/` endpoint returns bot status
 
 ## Deployment
 
 Deployed on Heroku with:
-- **Procfile**: `web: python bot.py` (updated to modern format)
-- **.python-version**: `3.12` (specifies Python version using modern approach)
+- **Procfile**: `web: uvicorn bot:app --host 0.0.0.0 --port $PORT` (FastAPI + uvicorn)
+- **.python-version**: `3.13` (latest Python version)
 - **Redis addon**: For token storage
-- **Webhook mode**: For efficient message processing
+- **FastAPI webhook server**: High-performance async webhook handling
 
 ### Heroku Setup
 1. Create Heroku app

@@ -1,15 +1,11 @@
 
-from __future__ import print_function
 import base64
 import requests
 import os
 import json
 import time
 import sys
-
-# Workaround to support both python 2 & 3
-import six
-import six.moves.urllib.parse as urllibparse
+import urllib.parse
 
 
 class SpotifyOauthError(Exception):
@@ -17,7 +13,7 @@ class SpotifyOauthError(Exception):
 
 
 def _make_authorization_headers(client_id, client_secret):
-    auth_header = base64.b64encode(six.text_type(client_id + ':' + client_secret).encode('ascii'))
+    auth_header = base64.b64encode((client_id + ':' + client_secret).encode('ascii'))
     return {'Authorization': 'Basic %s' % auth_header.decode('ascii')}
 
 
@@ -40,10 +36,15 @@ class RedisTokenStore(object):
         self.redis = redis
         
     def get(self):
-        return self.redis.hgetall('default.token')
+        token_data = self.redis.hgetall('default.token')
+        # Convert bytes keys/values to strings if needed
+        if token_data and isinstance(list(token_data.keys())[0], bytes):
+            return {k.decode('utf-8'): v.decode('utf-8') for k, v in token_data.items()}
+        return token_data
     
     def put(self, token):
-        self.redis.hmset('default.token', token)
+        # Use hset with mapping for modern redis-py
+        self.redis.hset('default.token', mapping=token)
 
 class RefreshingSpotifyClientCredentials(object):
     OAUTH_TOKEN_URL = 'https://accounts.spotify.com/api/token'
@@ -84,8 +85,12 @@ class RefreshingSpotifyClientCredentials(object):
         if is_token_expired(token_info):
             print("Refreshing OAuth2 Token")
             token_info = self.refresh_access_token(token_info['refresh_token'])
-            print("Storing new OAuth2 Tokens")
-            self.token_store.put(token_info)
+            if token_info:
+                print("Storing new OAuth2 Tokens")
+                self.token_store.put(token_info)
+            else:
+                print("Failed to refresh token")
+                return None
         
         return token_info['access_token']
 
@@ -131,7 +136,7 @@ class RefreshingSpotifyClientCredentials(object):
         token_info = response.json()
         print(token_info)
         token_info = self._add_custom_values_to_token_info(token_info)
-        if not 'refresh_token' in token_info:
+        if 'refresh_token' not in token_info:
             token_info['refresh_token'] = refresh_token
         return token_info
 

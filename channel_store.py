@@ -7,7 +7,8 @@ class ChannelStore:
 
     def get_playlist_id(self, channel_id):
         """Get playlist ID for a channel, returns None if not found"""
-        return self.redis.get(f"{self.key_prefix}{channel_id}")
+        result = self.redis.get(f"{self.key_prefix}{channel_id}")
+        return result.decode('utf-8') if result else None
 
     def set_playlist_id(self, channel_id, playlist_id):
         """Set playlist ID for a channel"""
