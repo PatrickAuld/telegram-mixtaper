@@ -197,6 +197,10 @@ playlister = None
 async def lifespan(_: FastAPI):
     global application
     
+    # Set up the application if not already done
+    if application is None:
+        setup_application()
+    
     async with application:
         await application.start()
         logger.info("Bot started")
