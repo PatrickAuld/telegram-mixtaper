@@ -20,7 +20,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 spotify_link_regex = r".*(https?://open\.spotify\.com/track/(?:[^?\s()<>{}\[\]]+|\([^\s()]*?\([^\s()]+\)[^\s()]*?\)|\([^\s]+?\))+)"
-error_channel = int(os.environ.get('TELEGRAM_ERROR_CHANNEL'))
+error_channel_str = os.environ.get('TELEGRAM_ERROR_CHANNEL')
+error_channel = int(error_channel_str) if error_channel_str else None
 
 class PlaylistMaker(object):
 
@@ -55,9 +56,15 @@ class PlaylistMaker(object):
                 results = self.spotify.user_playlist_add_tracks(self.user_id, self.playlist_id, links, position=0)
                 logger.info(f"Added {len(links)} tracks to playlist: {results}")
             except Exception as e:
-                logger.error(f"Error adding tracks to playlist: {e}")
-                if context.bot and error_channel:
-                    await context.bot.send_message(error_channel, f'Error adding tracks: {e}')
+                error_msg = str(e)
+                if "Invalid access token" in error_msg:
+                    logger.error("Spotify access token is invalid. Please regenerate tokens using get_spotify_tokens.py")
+                    if context.bot and error_channel:
+                        await context.bot.send_message(error_channel, 'Spotify access token is invalid. Please regenerate tokens.')
+                else:
+                    logger.error(f"Error adding tracks to playlist: {e}")
+                    if context.bot and error_channel:
+                        await context.bot.send_message(error_channel, f'Error adding tracks: {e}')
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,14 +86,23 @@ def get_spotify_client():
 
 def create_token_store():
     url = os.environ.get('REDIS_URL')
-    r = redis.from_url(url=url, db=0, decode_responses=True, charset='utf-8')
+    r = redis.from_url(url=url, db=0, decode_responses=True)
     return RedisTokenStore(r)
 
 def set_default_token(store: RedisTokenStore):
     token = store.get()
-    if not token:
+    if not token or not token.get('access_token') or not token.get('refresh_token'):
         access_token = os.environ.get('SPOTIFY_ACCESS_TOKEN')
         refresh_token = os.environ.get('SPOTIFY_REFRESH_TOKEN')
+        
+        # If no tokens are provided, skip setting default token
+        # This will force the RefreshingSpotifyClientCredentials to use client credentials flow
+        if not access_token or not refresh_token:
+            logger.warning("No Spotify access/refresh tokens provided. Bot will not be able to add tracks to playlists.")
+            logger.warning("Please set SPOTIFY_ACCESS_TOKEN and SPOTIFY_REFRESH_TOKEN in your .env file.")
+            logger.warning("Run 'python get_spotify_tokens.py' to obtain these tokens.")
+            return
+            
         token = {'expires_at': 0, 'access_token': access_token, 'refresh_token': refresh_token}
         store.put(token)
 
@@ -100,8 +116,11 @@ async def lifespan(_: FastAPI):
     TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
     webhook_prefix = os.environ.get('WEBHOOK_DOMAIN')
     
-    await application.bot.set_webhook(f"{webhook_prefix}{TOKEN}")
-    logger.info("Setting webhook")
+    if webhook_prefix:
+        await application.bot.set_webhook(f"{webhook_prefix}{TOKEN}")
+        logger.info("Setting webhook")
+    else:
+        logger.info("No webhook domain configured, skipping webhook setup")
     
     async with application:
         await application.start()
@@ -143,25 +162,15 @@ def setup_application():
     
     logger.info("Application setup complete")
 
-async def main():
-    """Start the bot."""
-    setup_application()
-    
-    # For local development, you can use polling instead of webhooks
-    if os.environ.get('USE_POLLING', 'false').lower() == 'true':
-        logger.info("Starting bot with polling...")
-        await application.run_polling()
-    else:
-        logger.info("Bot configured for webhook mode")
-        # The FastAPI app handles webhook requests
-
 if __name__ == '__main__':
-    # Setup the application when the module is imported
+    # Setup the application
     setup_application()
     
     # For running locally with polling
     if os.environ.get('USE_POLLING', 'false').lower() == 'true':
-        asyncio.run(main())
+        logger.info("Starting bot with polling...")
+        # Use the run_polling method which handles event loops properly
+        application.run_polling()
     else:
         # For production with webhooks, use uvicorn to run the FastAPI app
         import uvicorn

@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-mixtaper-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: telegram-mixtaper-bot
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code for development
+      - .:/app
+      # Override the virtual environment to use container's Python
+      - /app/.venv
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - USE_POLLING=true
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Override user to allow file editing from host
+    user: "1000:1000"
+    profiles:
+      - bot
+
+  # Optional: Redis Commander for GUI management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: telegram-mixtaper-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - tools
+
+volumes:
+  redis_data:
+    driver: local

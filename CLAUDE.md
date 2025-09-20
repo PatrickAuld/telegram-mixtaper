@@ -55,6 +55,8 @@ Updated dependencies from `requirements.txt`:
 - `redis>=5.0.0` - Modern Redis client
 - `fastapi>=0.104.0` - Fast async web framework for webhooks
 - `uvicorn>=0.24.0` - ASGI server for production deployment
+- `pytest>=8.0.0` - Testing framework
+- `pytest-asyncio>=0.23.0` - Async test support
 
 ### ✅ Modernization Complete
 The codebase has been updated to use the latest versions:
@@ -69,20 +71,295 @@ The codebase has been updated to use the latest versions:
 - **Modern Redis compatibility**: Updated for redis-py 5.0+
 - **Improved error handling**: Better async error handling and reporting
 
-### Local Development
-```bash
-# Install dependencies
-pip install -r requirements.txt
+### Local Development Setup
 
-# Set environment variables (create .env file)
+#### Quick Start (Recommended)
+```bash
+# One-command setup with Docker Compose
+./scripts/setup-dev.sh
+
+# Set your environment variables (see section 2 below)
 export TELEGRAM_BOT_TOKEN="your_bot_token"
 export SPOTIFY_CLIENT_ID="your_client_id"
-export USE_POLLING="true"  # For local development
-# ... other env vars
+# ... other required env vars
 
-# Run the bot (polling mode for local development)
-python bot.py
+# Start the bot
+./scripts/start-dev.sh
 ```
+
+#### 1. Set up Virtual Environment
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate virtual environment
+# On macOS/Linux:
+source .venv/bin/activate
+# On Windows:
+# .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+#### 1.5. Redis Setup (Docker Compose)
+```bash
+# Start Redis with Docker Compose (recommended)
+docker-compose up -d redis
+
+# Or start with Redis GUI for debugging
+./scripts/redis-gui.sh
+
+# Check Redis is running
+docker-compose ps
+```
+
+#### 2. Environment Configuration
+
+**Using .env file (Recommended):**
+```bash
+# Copy the template and edit with your values
+cp .env.template .env
+
+# Edit .env with your actual credentials
+# nano .env  # or use your preferred editor
+```
+
+**Manual Environment Variables:**
+```bash
+export TELEGRAM_BOT_TOKEN="your_bot_token_from_botfather"
+export SPOTIFY_CLIENT_ID="your_spotify_client_id"
+export SPOTIFY_CLIENT_SECRET="your_spotify_client_secret"
+export SPOTIFY_USER_ID="your_spotify_username"
+export SPOTIFY_PLAYLIST_ID="your_target_playlist_id"
+export USE_POLLING="true"  # Essential for local development
+export REDIS_URL="redis://localhost:6379"  # Local Redis instance
+export TELEGRAM_ERROR_CHANNEL="your_error_channel_id"  # Optional
+```
+
+#### 3. Telegram Bot Setup for Local Testing
+
+**Create a Test Bot:**
+1. Message [@BotFather](https://t.me/botfather) on Telegram
+2. Send `/newbot` and follow prompts
+3. Copy the bot token to `TELEGRAM_BOT_TOKEN`
+4. Send `/setprivacy` to BotFather and set to **Disabled** (allows bot to read all messages)
+
+**Create a Test Channel:**
+1. Create a new Telegram channel (public or private)
+2. Add your test bot as administrator with "Post Messages" permission
+3. Send a message with a Spotify link to test functionality
+
+**Get Channel ID for Error Reporting:**
+```bash
+# Send a message to your bot, then visit:
+https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
+# Look for "chat":{"id": -123456789} in the response
+```
+
+#### 4. Spotify Setup & OAuth Token Generation
+
+**Step 1: Create Spotify App**
+1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+2. Create a new app (any name/description)
+3. Note the Client ID and Client Secret
+4. Create a test playlist and note its ID from the URL
+
+**Step 2: Generate OAuth Tokens**
+
+The bot requires Spotify OAuth tokens to add tracks to playlists. Use the enhanced `get_spotify_tokens.py` script that supports both automated (ngrok) and manual modes:
+
+**🤖 Option A: Automated Mode (Interactive, uses ngrok)**
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Run token generator (auto-detects interactive mode)
+python get_spotify_tokens.py
+
+# Follow the prompts:
+# 1. Script creates ngrok tunnel and provides redirect URI
+# 2. Add the provided redirect URI to your Spotify app
+# 3. Script opens browser for authorization
+# 4. Tokens are automatically saved to .env file
+```
+
+**🔧 Option B: Manual Mode (CLI-friendly)**
+```bash
+# Step 1: Add permanent redirect URI to Spotify app
+# Go to Spotify app → Settings → Redirect URIs
+# Add: http://localhost:8080/callback
+
+# Step 2: Get authorization URL
+source .venv/bin/activate
+SPOTIFY_REDIRECT_URI='http://localhost:8080/callback' python get_spotify_tokens.py
+
+# Step 3: Open the provided URL in browser, authorize the app
+# You'll be redirected to: http://localhost:8080/callback?code=...
+
+# Step 4: Use the full redirect URL to get tokens
+AUTHORIZATION_URL='http://localhost:8080/callback?code=...' python get_spotify_tokens.py
+```
+
+**🛠️ Docker Environment (using container)**
+
+**Option 1: Automated Script with ngrok (Recommended)**
+```bash
+# Use the automated Docker script (handles everything including ngrok)
+./scripts/get-spotify-tokens-docker.sh
+
+# What this script does:
+# 1. Starts ngrok tunnel to create public HTTPS URL
+# 2. Provides the ngrok URL to add to Spotify app
+# 3. Starts local callback server to catch OAuth response
+# 4. Opens browser for authorization (automatic)
+# 5. Generates and saves tokens automatically
+# 6. Restarts bot with new tokens
+# 7. Cleans up ngrok tunnel when done
+```
+
+**Option 2: Manual Docker Commands (with ngrok)**
+```bash
+# Step 1: Start ngrok tunnel
+ngrok http 8080 &
+
+# Step 2: Get ngrok URL and add to Spotify app
+curl -s http://localhost:4040/api/tunnels | python3 -c "import sys, json; data = json.load(sys.stdin); print(data['tunnels'][0]['public_url'] + '/callback')"
+
+# Step 3: Use ngrok URL for token generation
+NGROK_URL="<your_ngrok_url>/callback"
+docker-compose run --rm -e SPOTIFY_REDIRECT_URI="$NGROK_URL" bot python get_spotify_tokens.py
+
+# Step 4: Complete OAuth and get tokens
+docker-compose exec -e AUTHORIZATION_URL='<redirect_url>' bot python get_spotify_tokens.py
+
+# Step 5: Stop ngrok and restart bot
+pkill ngrok
+docker-compose restart bot
+```
+
+**✅ Token Generation Features:**
+- 🌐 **ngrok integration**: Automatic HTTPS redirect URIs for seamless OAuth
+- 🔄 **Two modes**: Interactive (auto) and manual (CLI-friendly) 
+- 📝 **Auto .env update**: Tokens automatically written to .env file
+- 🧪 **Token validation**: Tests connection to Spotify API
+- 📋 **Clear instructions**: Step-by-step guidance for both modes
+- 🔒 **Secure**: Handles OAuth flow with proper scopes for playlist modification
+
+**Required Scopes:** `playlist-modify-public playlist-modify-private`
+
+After generating tokens, the .env file will be automatically updated with:
+```bash
+SPOTIFY_ACCESS_TOKEN=BQC4YWxhc2Rmc2RmMjM...
+SPOTIFY_REFRESH_TOKEN=AQC8vQES_P4e3uEO2E...
+```
+
+#### 5. Running the Bot Locally
+
+**Using Scripts (Recommended):**
+```bash
+# Start everything (Redis + Bot)
+./scripts/start-dev.sh
+
+# Stop everything
+./scripts/stop-dev.sh
+
+# Run tests
+./scripts/test.sh
+
+# Access Redis CLI for debugging
+./scripts/redis-cli.sh
+
+# Open Redis GUI (browser-based)
+./scripts/redis-gui.sh
+```
+
+**Manual Method:**
+```bash
+# Start Redis first
+docker-compose up -d redis
+
+# Run with polling (recommended for local development)
+export USE_POLLING="true"
+python bot.py
+
+# The bot will start polling for messages
+# Send Spotify links in your test channel to verify functionality
+```
+
+#### 6. Testing
+
+**Run Unit Tests:**
+```bash
+# Using scripts (handles Redis setup automatically)
+./scripts/test.sh
+
+# Manual method
+pytest test_bot.py -v
+
+# Run specific test class
+pytest test_bot.py::TestPlaylistMaker -v
+
+# Run with coverage (install pytest-cov first)
+pip install pytest-cov
+pytest test_bot.py --cov=bot --cov=oauth2 --cov=channel_store
+```
+
+**Manual Testing with Telegram:**
+1. Start the bot: `./scripts/start-dev.sh`
+2. In your test channel, send messages with Spotify track links:
+   ```
+   Check out this song: https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC
+   ```
+3. Verify tracks are added to your Spotify playlist
+4. Check console logs for any errors
+5. Use `./scripts/redis-cli.sh` to inspect stored tokens and data
+
+**Test Different Scenarios:**
+- Multiple Spotify links in one message
+- Links with query parameters (`?si=xyz`)
+- Mixed messages with text and links
+- Invalid or non-Spotify links (should be ignored)
+
+#### Development Scripts Reference
+
+| Script | Purpose |
+|--------|---------|
+| `./scripts/setup-dev.sh` | Complete environment setup (venv + Redis) |
+| `./scripts/start-dev.sh` | Start bot with Redis in polling mode |
+| `./scripts/stop-dev.sh` | Stop all services and containers |
+| `./scripts/test.sh` | Run unit tests with coverage |
+| `./scripts/redis-cli.sh` | Access Redis command line interface |
+| `./scripts/redis-gui.sh` | Start Redis Commander GUI (http://localhost:8081) |
+| `python get_spotify_tokens.py` | Generate Spotify OAuth tokens (supports ngrok + manual modes) |
+| `./scripts/get-spotify-tokens-docker.sh` | Docker-friendly Spotify token generation script |
+
+#### Docker Services
+
+- **Redis**: Persistent storage for Spotify tokens and channel mappings
+- **Redis Commander**: Web-based GUI for Redis management (optional, started with `--profile tools`)
+
+#### Debugging Tools
+
+**Redis CLI Commands:**
+```bash
+# View all keys
+KEYS *
+
+# Check Spotify tokens
+HGETALL default.token
+
+# View channel mappings  
+KEYS channel_playlist:*
+
+# Clear all data (for testing)
+FLUSHALL
+```
+
+**Redis GUI:**
+- Start: `./scripts/redis-gui.sh`
+- Access: http://localhost:8081
+- Features: Browse keys, execute commands, real-time monitoring
 
 ### Testing
 - **Production**: Uses FastAPI webhook server with uvicorn
@@ -131,9 +408,74 @@ Deployed on Heroku with:
 - Monitor Redis usage in Heroku dashboard
 
 ### Troubleshooting
-- **Token issues**: Check Spotify token expiration in Redis
+
+**Spotify Token Issues:**
+- **"Invalid access token" errors**: Run `python get_spotify_tokens.py` to regenerate tokens
+- **"400 Bad Request" during refresh**: Tokens are corrupted, regenerate with token script
+- **Empty tokens in Redis**: Check that `.env` has `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_REFRESH_TOKEN`
+- **Token generation fails**: Ensure redirect URI is added to Spotify app settings
+
+**ngrok/OAuth Issues:**
+- **ngrok tunnel fails**: Check if ngrok is installed (`which ngrok`)
+- **Browser doesn't open**: Copy the authorization URL manually
+- **Redirect URI mismatch**: Ensure the ngrok URL is added to Spotify app redirect URIs
+- **Non-interactive mode**: Use manual mode with `SPOTIFY_REDIRECT_URI='http://localhost:8080/callback'`
+
+**General Issues:**
 - **Permission errors**: Ensure bot has admin rights in target channels
 - **Playlist errors**: Verify playlist ID and user permissions
+- **Redis connection errors**: Start Redis with `docker-compose up -d redis`
+
+**Quick Token Reset:**
+```bash
+# Clear Redis tokens and regenerate
+docker-compose exec redis redis-cli DEL default.token
+python get_spotify_tokens.py
+docker-compose restart bot
+```
+
+## Quick Reference: Spotify Token Generation
+
+### 🚀 **Fastest Setup (Interactive)**
+```bash
+source .venv/bin/activate
+python get_spotify_tokens.py
+# Follow prompts, add ngrok URL to Spotify app, authorize in browser
+```
+
+### 🔧 **CLI Setup (Non-Interactive)**
+```bash
+# 1. Add http://localhost:8080/callback to Spotify app once
+# 2. Get auth URL
+SPOTIFY_REDIRECT_URI='http://localhost:8080/callback' python get_spotify_tokens.py
+# 3. Open URL, authorize, copy full redirect URL
+# 4. Get tokens
+AUTHORIZATION_URL='http://localhost:8080/callback?code=...' python get_spotify_tokens.py
+```
+
+### 🐳 **Docker Environment**
+```bash
+# Automated script with ngrok (recommended)
+./scripts/get-spotify-tokens-docker.sh
+
+# Or manual with ngrok: 
+# 1. ngrok http 8080 & 
+# 2. Add ngrok URL to Spotify app
+# 3. docker-compose run --rm -e SPOTIFY_REDIRECT_URI='<ngrok_url>/callback' bot python get_spotify_tokens.py
+# 4. docker-compose exec -e AUTHORIZATION_URL='<redirect_url>' bot python get_spotify_tokens.py
+```
+
+### ✅ **Verification**
+```bash
+# Check tokens are in .env
+grep SPOTIFY_ .env
+
+# Restart bot to use new tokens
+docker-compose restart bot
+
+# Check bot logs for success
+docker-compose logs bot --tail=10
+```
 
 ## Security Notes
 - Spotify tokens are stored securely in Redis
