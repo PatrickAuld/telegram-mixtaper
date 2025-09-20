@@ -196,14 +196,6 @@ playlister = None
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global application
-    TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-    webhook_prefix = os.environ.get('WEBHOOK_DOMAIN')
-    
-    if webhook_prefix:
-        await application.bot.set_webhook(f"{webhook_prefix}{TOKEN}")
-        logger.info("Setting webhook")
-    else:
-        logger.info("No webhook domain configured, skipping webhook setup")
     
     async with application:
         await application.start()
