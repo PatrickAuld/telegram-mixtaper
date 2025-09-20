@@ -46,6 +46,75 @@ class PlaylistMaker(object):
                     links.append(group0)
         return links
 
+    def extract_track_id(self, spotify_url):
+        """Extract track ID from Spotify URL"""
+        # Handle both formats: 
+        # https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC
+        # https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=...
+        track_match = re.search(r'/track/([a-zA-Z0-9]+)', spotify_url)
+        if track_match:
+            return track_match.group(1)
+        return None
+
+    async def get_track_info(self, track_id):
+        """Get track information from Spotify API"""
+        try:
+            track = self.spotify.track(track_id)
+            return {
+                'name': track['name'],
+                'artists': [artist['name'] for artist in track['artists']],
+                'album': track['album']['name'],
+                'artwork_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
+                'external_url': track['external_urls']['spotify']
+            }
+        except Exception as e:
+            logger.error(f"Error getting track info for {track_id}: {e}")
+            return None
+
+    async def post_track_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, track_info):
+        """Post track information as a reply to the original message with artwork"""
+        if not track_info:
+            return
+        
+        artists_str = ", ".join(track_info['artists'])
+        caption = f"🎵 **{track_info['name']}**\n👤 {artists_str}\n💿 {track_info['album']}"
+        
+        try:
+            # Send photo with caption if artwork is available
+            if track_info['artwork_url']:
+                try:
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=track_info['artwork_url'],
+                        caption=caption,
+                        parse_mode='Markdown',
+                        reply_to_message_id=update.message.message_id
+                    )
+                    return
+                except Exception as e:
+                    logger.warning(f"Could not send photo with caption: {e}")
+            
+            # Fallback: send text message only if photo failed or no artwork
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=caption,
+                parse_mode='Markdown',
+                reply_to_message_id=update.message.message_id
+            )
+                    
+        except Exception as e:
+            logger.error(f"Error posting track info: {e}")
+            # Final fallback without markdown if formatting fails
+            try:
+                fallback_message = f"🎵 {track_info['name']}\n👤 {artists_str}\n💿 {track_info['album']}"
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=fallback_message,
+                    reply_to_message_id=update.message.message_id
+                )
+            except Exception as fallback_error:
+                logger.error(f"Error with fallback message: {fallback_error}")
+
     async def find_spotify_links(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message or not update.message.text:
             return
@@ -53,12 +122,26 @@ class PlaylistMaker(object):
         links = self.get_spotify_links(update.message.text)
         if links:
             try:
+                # Add tracks to playlist
                 results = self.spotify.user_playlist_add_tracks(self.user_id, self.playlist_id, links, position=0)
                 logger.info(f"Added {len(links)} tracks to playlist: {results}")
+                
+                # Post track information for each link
+                for link in links:
+                    track_id = self.extract_track_id(link)
+                    if track_id:
+                        track_info = await self.get_track_info(track_id)
+                        if track_info:
+                            await self.post_track_info(update, context, track_info)
+                        else:
+                            logger.warning(f"Could not get track info for {track_id}")
+                    else:
+                        logger.warning(f"Could not extract track ID from {link}")
+                        
             except Exception as e:
                 error_msg = str(e)
                 if "Invalid access token" in error_msg:
-                    logger.error("Spotify access token is invalid. Please regenerate tokens using get_spotify_tokens.py")
+                    logger.error("Spotify access token is invalid. Please regenerate tokens using get_oauth_tokens.py")
                     if context.bot and error_channel:
                         await context.bot.send_message(error_channel, 'Spotify access token is invalid. Please regenerate tokens.')
                 else:
