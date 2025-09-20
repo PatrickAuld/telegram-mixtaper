@@ -167,24 +167,40 @@ https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
 
 **Step 2: Generate OAuth Tokens**
 
-The bot requires Spotify OAuth tokens to add tracks to playlists. Use the enhanced `get_spotify_tokens.py` script that supports both automated (ngrok) and manual modes:
+The bot requires Spotify OAuth tokens to add tracks to playlists. Use the working OAuth token scripts:
 
-**🤖 Option A: Automated Mode (Interactive, uses ngrok)**
+**🚀 Recommended: Working OAuth Scripts**
+
+**Option 1: Python OAuth Script (Primary)**
 ```bash
-# Activate virtual environment
-source .venv/bin/activate
+# Use the proven working Python script
+python get_oauth_tokens.py
 
-# Run token generator (auto-detects interactive mode)
-python get_spotify_tokens.py
-
-# Follow the prompts:
-# 1. Script creates ngrok tunnel and provides redirect URI
-# 2. Add the provided redirect URI to your Spotify app
-# 3. Script opens browser for authorization
-# 4. Tokens are automatically saved to .env file
+# This script handles:
+# - Automatic ngrok tunnel setup with proper cleanup
+# - Clear redirect URI instructions for Spotify app configuration
+# - Browser-based OAuth authorization flow
+# - Automatic token extraction and .env file updates
+# - Resolves common OAuth redirect URI mismatch issues
 ```
 
-**🔧 Option B: Manual Mode (CLI-friendly)**
+**Option 2: Shell Script Wrapper (Streamlined)**
+```bash
+# Use the working shell script for simplified execution
+./get_oauth_tokens.sh
+
+# Streamlined wrapper that calls the Python script
+# with optimal settings for reliable token generation
+```
+
+**✅ Advantages of these scripts:**
+- No redirect URI mismatch errors
+- Proper ngrok tunnel coordination
+- Reliable environment variable handling  
+- Automatic .env file token persistence
+- Tested and proven to work
+
+**🔧 Legacy Option: Manual Mode (if needed)**
 ```bash
 # Step 1: Add permanent redirect URI to Spotify app
 # Go to Spotify app → Settings → Redirect URIs
@@ -203,19 +219,40 @@ AUTHORIZATION_URL='http://localhost:8080/callback?code=...' python get_spotify_t
 
 **🛠️ Docker Environment (using container)**
 
-**Option 1: Automated Script with ngrok (Recommended)**
+**Option 0: Simple ngrok Script (Most Reliable)**
 ```bash
-# Use the automated Docker script (handles everything including ngrok)
+# Simplified approach with manual callback handling
+./scripts/simple-spotify-tokens.sh
+
+# What this script does:
+# 1. ✅ Starts ngrok tunnel and gets public HTTPS URL
+# 2. 📝 Shows exact redirect URI to add to Spotify app  
+# 3. 🔗 Generates and opens OAuth authorization URL
+# 4. 📋 Prompts you to paste the callback URL manually
+# 5. 🔑 Extracts and displays OAuth tokens
+# 6. 💾 Automatically saves tokens to .env file
+# 7. 🧹 Cleans up ngrok tunnel when done
+
+# Advantages:
+# - No port conflicts or callback server issues
+# - Exact redirect URI matching prevents OAuth errors
+# - Works reliably in all environments
+# - Simple manual step ensures proper authorization
+```
+
+**Option 1: Streamlined Script with ngrok (Automated)**
+```bash
+# Use the streamlined Docker script (handles everything including ngrok)
 ./scripts/get-spotify-tokens-docker.sh
 
 # What this script does:
-# 1. Starts ngrok tunnel to create public HTTPS URL
-# 2. Provides the ngrok URL to add to Spotify app
-# 3. Starts local callback server to catch OAuth response
-# 4. Opens browser for authorization (automatic)
-# 5. Generates and saves tokens automatically
-# 6. Restarts bot with new tokens
-# 7. Cleans up ngrok tunnel when done
+# 1. ✅ Sets up ngrok tunnel and gets public HTTPS URL
+# 2. 📝 Prompts user to add ngrok URL to Spotify app
+# 3. 🔗 Opens OAuth authorization URL in browser  
+# 4. 🔑 Prints the OAuth access and refresh tokens
+# 5. 💾 Automatically saves tokens to .env file
+# 6. 🔄 Restarts bot with new tokens
+# 7. 🧹 Cleans up ngrok tunnel when done
 ```
 
 **Option 2: Manual Docker Commands (with ngrok)**
@@ -331,7 +368,8 @@ pytest test_bot.py --cov=bot --cov=oauth2 --cov=channel_store
 | `./scripts/test.sh` | Run unit tests with coverage |
 | `./scripts/redis-cli.sh` | Access Redis command line interface |
 | `./scripts/redis-gui.sh` | Start Redis Commander GUI (http://localhost:8081) |
-| `python get_spotify_tokens.py` | Generate Spotify OAuth tokens (supports ngrok + manual modes) |
+| `python get_oauth_tokens.py` | Generate Spotify OAuth tokens (recommended working script) |
+| `./get_oauth_tokens.sh` | Shell wrapper for OAuth token generation |
 | `./scripts/get-spotify-tokens-docker.sh` | Docker-friendly Spotify token generation script |
 
 #### Docker Services
@@ -410,15 +448,18 @@ Deployed on Heroku with:
 ### Troubleshooting
 
 **Spotify Token Issues:**
-- **"Invalid access token" errors**: Run `python get_spotify_tokens.py` to regenerate tokens
-- **"400 Bad Request" during refresh**: Tokens are corrupted, regenerate with token script
+- **"Invalid access token" errors**: Run `python get_oauth_tokens.py` to regenerate tokens (recommended)
+- **"400 Bad Request" during refresh**: Tokens are corrupted, regenerate with `./get_oauth_tokens.sh`
 - **Empty tokens in Redis**: Check that `.env` has `SPOTIFY_ACCESS_TOKEN` and `SPOTIFY_REFRESH_TOKEN`
-- **Token generation fails**: Ensure redirect URI is added to Spotify app settings
+- **Token generation fails**: Use the working `get_oauth_tokens.py` script which handles redirect URI issues
+- **Redirect URI problems**: The `get_oauth_tokens.py` script resolves common OAuth mismatch errors
 
 **ngrok/OAuth Issues:**
 - **ngrok tunnel fails**: Check if ngrok is installed (`which ngrok`)
 - **Browser doesn't open**: Copy the authorization URL manually
-- **Redirect URI mismatch**: Ensure the ngrok URL is added to Spotify app redirect URIs
+- **"INVALID_CLIENT: Invalid redirect URI"**: Use `./scripts/simple-spotify-tokens.sh` (ensures exact URI matching)
+- **Redirect URI mismatch**: Ensure the exact ngrok URL (including `/callback`) is added to Spotify app
+- **"Address already in use"**: Try the simplified script to avoid port conflicts
 - **Non-interactive mode**: Use manual mode with `SPOTIFY_REDIRECT_URI='http://localhost:8080/callback'`
 
 **General Issues:**
@@ -428,15 +469,30 @@ Deployed on Heroku with:
 
 **Quick Token Reset:**
 ```bash
-# Clear Redis tokens and regenerate
+# Clear Redis tokens and regenerate with working script
 docker-compose exec redis redis-cli DEL default.token
-python get_spotify_tokens.py
+python get_oauth_tokens.py
 docker-compose restart bot
 ```
 
 ## Quick Reference: Spotify Token Generation
 
-### 🚀 **Fastest Setup (Interactive)**
+### 🚀 **Recommended: Working OAuth Scripts**
+```bash
+# Primary method - tested and reliable
+python get_oauth_tokens.py
+
+# Or use the shell wrapper
+./get_oauth_tokens.sh
+
+# These scripts handle:
+# - ngrok tunnel setup and cleanup
+# - Spotify app redirect URI configuration
+# - OAuth authorization flow
+# - Automatic .env token updates
+```
+
+### 🔧 **Alternative: Legacy Scripts**
 ```bash
 source .venv/bin/activate
 python get_spotify_tokens.py
