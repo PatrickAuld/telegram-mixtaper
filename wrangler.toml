@@ -1,0 +1,29 @@
+name = "telegram-mixtaper"
+main = "src/worker.js"
+compatibility_date = "2024-09-20"
+
+# KV Namespaces for token storage
+# For local development, Wrangler will create temporary KV stores
+[[kv_namespaces]]
+binding = "SPOTIFY_TOKENS"
+preview_id = "spotify-tokens-preview"
+id = "spotify-tokens-production"
+
+# Production environment configuration
+[env.production]
+kv_namespaces = [
+  { binding = "SPOTIFY_TOKENS", preview_id = "spotify-tokens-preview", id = "spotify-tokens-production" }
+]
+
+# Environment variables (non-secret)
+[vars]
+SPOTIFY_USER_ID = "patrick.auld"
+SPOTIFY_PLAYLIST_ID = "30VMMS6lOggdRImCEoWAxl"
+
+# Secrets (use: wrangler secret put <name>)
+# Run these commands to set secrets:
+# wrangler secret put SPOTIFY_CLIENT_ID
+# wrangler secret put SPOTIFY_CLIENT_SECRET  
+# wrangler secret put TELEGRAM_BOT_TOKEN
+# wrangler secret put SPOTIFY_ACCESS_TOKEN
+# wrangler secret put SPOTIFY_REFRESH_TOKEN

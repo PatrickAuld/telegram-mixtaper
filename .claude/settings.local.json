@@ -2,7 +2,30 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(docker-compose:*)",
+      "Bash(export USE_POLLING=\"true\")",
+      "Bash(echo:*)",
+      "Bash(export REDIS_URL=\"redis://localhost:6379\")",
+      "Bash(export TELEGRAM_BOT_TOKEN=\"test\")",
+      "Bash(export SPOTIFY_CLIENT_ID=\"test\")",
+      "Bash(export SPOTIFY_CLIENT_SECRET=\"test\")",
+      "Bash(set -a)",
+      "Bash(source .env)",
+      "Bash(set +a)",
+      "Bash(./scripts/start-dev.sh:*)",
+      "Bash(source:*)",
+      "Bash(./scripts/start-docker.sh:*)",
+      "Bash(./scripts/redis-cli-docker.sh:*)",
+      "Bash(curl:*)",
+      "Bash(SPOTIFY_REDIRECT_URI='http://localhost:8080/callback' python get_spotify_tokens.py)",
+      "Bash(./scripts/get-spotify-tokens-docker.sh:*)",
+      "Bash(ngrok:*)",
+      "Bash(pkill:*)",
+      "Read(//private/tmp/**)",
+      "Bash(./scripts/simple-spotify-tokens.sh:*)",
+      "Bash(wrangler dev:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []

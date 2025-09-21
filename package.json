@@ -1,0 +1,29 @@
+{
+  "name": "telegram-mixtaper",
+  "version": "1.0.0",
+  "description": "Telegram bot that monitors channels for Spotify links and adds them to playlists",
+  "type": "module",
+  "main": "src/worker.js",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "dev:polling": "node src/local-dev.js",
+    "oauth": "node get-oauth-tokens.js",
+    "deploy": "wrangler deploy",
+    "test": "wrangler dev --local --test"
+  },
+  "keywords": [
+    "telegram",
+    "spotify",
+    "bot",
+    "cloudflare-workers"
+  ],
+  "author": "Patrick Auld",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.2",
+    "open": "^10.2.0"
+  }
+}
