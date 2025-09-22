@@ -39,17 +39,18 @@ class LocalDevBot {
   }
 
   /**
-   * Extract Spotify track URLs from text
+   * Extract Spotify URLs from text (tracks, albums, playlists)
    */
   extractSpotifyLinks(text) {
-    const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/track\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
+    const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
     const links = [];
     let match;
     
     while ((match = spotifyLinkRegex.exec(text)) !== null) {
       links.push({
         url: match[0],
-        trackId: match[1]
+        type: match[1], // 'track', 'album', or 'playlist'
+        id: match[2]
       });
     }
     
@@ -57,30 +58,47 @@ class LocalDevBot {
   }
 
   /**
-   * Process Spotify links - add to playlist and send track info
+   * Process Spotify links - add tracks to playlist and send content info
    */
   async processSpotifyLinks(spotifyLinks, message) {
     try {
       console.log(`Processing ${spotifyLinks.length} Spotify links...`);
 
-      // Get track URIs for playlist
-      const trackUris = spotifyLinks.map(link => `spotify:track:${link.trackId}`);
+      // Separate tracks for playlist addition
+      const trackLinks = spotifyLinks.filter(link => link.type === 'track');
       
-      // Add tracks to playlist
+      // Add tracks to playlist if any exist
+      if (trackLinks.length > 0) {
+        const trackUris = trackLinks.map(link => `spotify:track:${link.id}`);
+        const accessToken = await this.spotifyTokenManager.getAccessToken();
+        await this.spotifyAPI.addTracksToPlaylist(trackUris, accessToken, this.spotifyTokenManager.env);
+        console.log(`✅ Added ${trackUris.length} tracks to playlist`);
+      }
+      
+      // Send info for each Spotify item (tracks, albums, playlists)
       const accessToken = await this.spotifyTokenManager.getAccessToken();
-      await this.spotifyAPI.addTracksToPlaylist(trackUris, accessToken, this.spotifyTokenManager.env);
-      console.log(`✅ Added ${trackUris.length} tracks to playlist`);
-      
-      // Send track info for each link
       for (const link of spotifyLinks) {
         try {
-          const trackInfo = await this.spotifyAPI.getTrackInfo(link.trackId, accessToken);
-          if (trackInfo) {
-            await this.telegramBot.sendTrackInfo(trackInfo, message);
-            console.log(`✅ Sent track info for: ${trackInfo.name}`);
+          let contentInfo;
+          
+          switch (link.type) {
+            case 'track':
+              contentInfo = await this.spotifyAPI.getTrackInfo(link.id, accessToken);
+              break;
+            case 'album':
+              contentInfo = await this.spotifyAPI.getAlbumInfo(link.id, accessToken);
+              break;
+            case 'playlist':
+              contentInfo = await this.spotifyAPI.getPlaylistInfo(link.id, accessToken);
+              break;
+          }
+          
+          if (contentInfo) {
+            await this.telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
+            console.log(`✅ Sent ${link.type} info for: ${contentInfo.name}`);
           }
         } catch (error) {
-          console.error(`❌ Error processing track ${link.trackId}:`, error.message);
+          console.error(`❌ Error processing ${link.type} ${link.id}:`, error.message);
         }
       }
       
@@ -117,7 +135,7 @@ class LocalDevBot {
         return;
       }
       
-      console.log(`🎵 Found ${spotifyLinks.length} Spotify links:`, spotifyLinks.map(l => l.trackId));
+      console.log(`🎵 Found ${spotifyLinks.length} Spotify links:`, spotifyLinks.map(l => `${l.type}:${l.id}`));
       
       // Process Spotify links
       await this.processSpotifyLinks(spotifyLinks, message);

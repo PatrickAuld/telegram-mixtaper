@@ -47,6 +47,86 @@ export class SpotifyAPI {
   }
 
   /**
+   * Get album information from Spotify
+   */
+  async getAlbumInfo(albumId, accessToken) {
+    try {
+      const response = await fetch(`${this.baseURL}/albums/${albumId}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Spotify API error: ${response.status} - ${response.statusText}`);
+      }
+
+      const album = await response.json();
+      
+      // Extract relevant information
+      return {
+        id: album.id,
+        name: album.name,
+        artists: album.artists.map(artist => artist.name),
+        type: 'album',
+        track_count: album.total_tracks,
+        release_date: album.release_date,
+        artwork_url: album.images && album.images.length > 0 
+          ? album.images[0].url 
+          : null,
+        external_urls: album.external_urls,
+        genres: album.genres || []
+      };
+
+    } catch (error) {
+      console.error(`Error getting album info for ${albumId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get playlist information from Spotify
+   */
+  async getPlaylistInfo(playlistId, accessToken) {
+    try {
+      const response = await fetch(`${this.baseURL}/playlists/${playlistId}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Spotify API error: ${response.status} - ${response.statusText}`);
+      }
+
+      const playlist = await response.json();
+      
+      // Extract relevant information
+      return {
+        id: playlist.id,
+        name: playlist.name,
+        description: playlist.description,
+        type: 'playlist',
+        owner: playlist.owner.display_name,
+        track_count: playlist.tracks.total,
+        public: playlist.public,
+        collaborative: playlist.collaborative,
+        artwork_url: playlist.images && playlist.images.length > 0 
+          ? playlist.images[0].url 
+          : null,
+        external_urls: playlist.external_urls,
+        followers: playlist.followers?.total || 0
+      };
+
+    } catch (error) {
+      console.error(`Error getting playlist info for ${playlistId}:`, error);
+      return null;
+    }
+  }
+
+  /**
    * Add tracks to a Spotify playlist
    */
   async addTracksToPlaylist(trackUris, accessToken, env) {

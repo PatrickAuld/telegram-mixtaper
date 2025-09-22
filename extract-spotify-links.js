@@ -17,30 +17,32 @@ function extractSpotifyLinks(htmlFile) {
         const dom = new JSDOM(htmlContent);
         const document = dom.window.document;
         
-        // Find all anchor tags with Spotify track links
-        const links = document.querySelectorAll('a[href*="open.spotify.com/track/"]');
+        // Find all anchor tags with Spotify links (tracks, albums, playlists)
+        const links = document.querySelectorAll('a[href*="open.spotify.com/"]');
         
-        const trackLinks = [];
-        const seenTrackIds = new Set();
+        const spotifyLinks = [];
+        const seenIds = new Set();
         
         // Process links in document order (oldest first in Telegram exports)
         for (const link of links) {
             const href = link.href;
             
-            // Extract track ID from the URL
-            const trackIdMatch = href.match(/open\.spotify\.com\/track\/([a-zA-Z0-9]+)/);
-            if (trackIdMatch) {
-                const trackId = trackIdMatch[1];
+            // Extract ID from the URL for tracks, albums, or playlists
+            const spotifyMatch = href.match(/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/);
+            if (spotifyMatch) {
+                const type = spotifyMatch[1];
+                const id = spotifyMatch[2];
+                const key = `${type}:${id}`;
                 
-                // Only add if we haven't seen this track ID before
-                if (!seenTrackIds.has(trackId)) {
-                    seenTrackIds.add(trackId);
-                    trackLinks.push(href);
+                // Only add if we haven't seen this ID before
+                if (!seenIds.has(key)) {
+                    seenIds.add(key);
+                    spotifyLinks.push(href);
                 }
             }
         }
         
-        return trackLinks;
+        return spotifyLinks;
         
     } catch (error) {
         console.error('Error processing file:', error.message);
@@ -65,7 +67,7 @@ function main() {
     const links = extractSpotifyLinks(filename);
     
     if (links.length === 0) {
-        console.error('No Spotify track links found in the file.');
+        console.error('No Spotify links found in the file.');
         process.exit(1);
     }
     
@@ -75,7 +77,7 @@ function main() {
     }
     
     // Log summary to stderr so it doesn't interfere with piped output
-    console.error(`\nExtracted ${links.length} unique Spotify track links (oldest first)`);
+    console.error(`\nExtracted ${links.length} unique Spotify links (tracks, albums, playlists) - oldest first`);
 }
 
 // Run if called directly

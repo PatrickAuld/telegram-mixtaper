@@ -118,6 +118,74 @@ export class TelegramBot {
   }
 
   /**
+   * Send Spotify content information (tracks, albums, playlists) as a reply to the original message
+   */
+  async sendSpotifyInfo(contentInfo, contentType, originalMessage) {
+    try {
+      const chatId = originalMessage.chat.id;
+      const messageId = originalMessage.message_id;
+
+      let caption;
+      
+      switch (contentType) {
+        case 'track':
+          const artists = contentInfo.artists.join(', ');
+          caption = `🎵 <b>${contentInfo.name}</b>\n👤 ${artists}\n💿 ${contentInfo.album}`;
+          break;
+          
+        case 'album':
+          const albumArtists = contentInfo.artists.join(', ');
+          caption = `💿 <b>${contentInfo.name}</b>\n👤 ${albumArtists}\n📅 ${contentInfo.release_date}\n🎵 ${contentInfo.track_count} tracks`;
+          break;
+          
+        case 'playlist':
+          caption = `📃 <b>${contentInfo.name}</b>\n👤 by ${contentInfo.owner}\n🎵 ${contentInfo.track_count} tracks`;
+          if (contentInfo.description) {
+            // Truncate description if too long
+            const desc = contentInfo.description.length > 100 
+              ? contentInfo.description.substring(0, 100) + '...' 
+              : contentInfo.description;
+            caption += `\n📝 ${desc}`;
+          }
+          if (contentInfo.followers > 0) {
+            caption += `\n👥 ${contentInfo.followers} followers`;
+          }
+          break;
+          
+        default:
+          caption = `🎵 <b>${contentInfo.name}</b>`;
+      }
+
+      if (contentInfo.artwork_url) {
+        // Send photo with content info as caption
+        return await this.sendPhoto(chatId, contentInfo.artwork_url, caption, {
+          reply_to_message_id: messageId
+        });
+      } else {
+        // Send text message if no artwork available
+        return await this.sendMessage(chatId, caption, {
+          reply_to_message_id: messageId
+        });
+      }
+
+    } catch (error) {
+      console.error(`Error sending ${contentType} info:`, error);
+      
+      // Fallback: try to send just text without photo
+      try {
+        const fallbackText = `🎵 ${contentInfo.name}`;
+        
+        return await this.sendMessage(originalMessage.chat.id, fallbackText, {
+          reply_to_message_id: originalMessage.message_id
+        });
+      } catch (fallbackError) {
+        console.error('Fallback message also failed:', fallbackError);
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Set webhook URL
    */
   async setWebhook(webhookUrl, options = {}) {

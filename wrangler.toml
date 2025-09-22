@@ -26,3 +26,7 @@ SPOTIFY_PLAYLIST_ID = "30VMMS6lOggdRImCEoWAxl"
 # wrangler secret put TELEGRAM_BOT_TOKEN
 # wrangler secret put SPOTIFY_ACCESS_TOKEN
 # wrangler secret put SPOTIFY_REFRESH_TOKEN
+
+[observability.logs]
+enabled = true
+

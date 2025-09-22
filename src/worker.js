@@ -78,17 +78,18 @@ async function handleTelegramWebhook(request, env, ctx) {
 }
 
 /**
- * Extract Spotify track URLs from text
+ * Extract Spotify URLs from text (tracks, albums, playlists)
  */
 function extractSpotifyLinks(text) {
-  const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/track\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
+  const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
   const links = [];
   let match;
   
   while ((match = spotifyLinkRegex.exec(text)) !== null) {
     links.push({
       url: match[0],
-      trackId: match[1]
+      type: match[1], // 'track', 'album', or 'playlist'
+      id: match[2]
     });
   }
   
@@ -96,32 +97,48 @@ function extractSpotifyLinks(text) {
 }
 
 /**
- * Process Spotify links - add to playlist and send track info
+ * Process Spotify links - add tracks to playlist and send content info
  */
 async function processSpotifyLinks(spotifyLinks, message, env) {
   try {
     const tokenManager = new SpotifyTokenManager(env);
     const spotifyAPI = new SpotifyAPI(tokenManager);
     const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
-    
-    // Get track URIs for playlist
-    const trackUris = spotifyLinks.map(link => `spotify:track:${link.trackId}`);
-    
-    // Add tracks to playlist
     const accessToken = await tokenManager.getAccessToken();
-    await spotifyAPI.addTracksToPlaylist(trackUris, accessToken, env);
-    console.log(`Added ${trackUris.length} tracks to playlist`);
     
-    // Send track info for each link
+    // Separate tracks for playlist addition
+    const trackLinks = spotifyLinks.filter(link => link.type === 'track');
+    
+    // Add tracks to playlist if any exist
+    if (trackLinks.length > 0) {
+      const trackUris = trackLinks.map(link => `spotify:track:${link.id}`);
+      await spotifyAPI.addTracksToPlaylist(trackUris, accessToken, env);
+      console.log(`Added ${trackUris.length} tracks to playlist`);
+    }
+    
+    // Send info for each Spotify item (tracks, albums, playlists)
     for (const link of spotifyLinks) {
       try {
-        const trackInfo = await spotifyAPI.getTrackInfo(link.trackId, accessToken);
-        if (trackInfo) {
-          await telegramBot.sendTrackInfo(trackInfo, message);
-          console.log(`Sent track info for: ${trackInfo.name}`);
+        let contentInfo;
+        
+        switch (link.type) {
+          case 'track':
+            contentInfo = await spotifyAPI.getTrackInfo(link.id, accessToken);
+            break;
+          case 'album':
+            contentInfo = await spotifyAPI.getAlbumInfo(link.id, accessToken);
+            break;
+          case 'playlist':
+            contentInfo = await spotifyAPI.getPlaylistInfo(link.id, accessToken);
+            break;
+        }
+        
+        if (contentInfo) {
+          await telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
+          console.log(`Sent ${link.type} info for: ${contentInfo.name}`);
         }
       } catch (error) {
-        console.error(`Error processing track ${link.trackId}:`, error);
+        console.error(`Error processing ${link.type} ${link.id}:`, error);
       }
     }
     
