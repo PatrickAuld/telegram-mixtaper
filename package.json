@@ -8,6 +8,7 @@
     "dev": "wrangler dev --local",
     "dev:polling": "node src/local-dev.js",
     "oauth": "node get-oauth-tokens.js",
+    "extract-links": "node extract-spotify-links.js",
     "deploy": "wrangler deploy",
     "test": "wrangler dev --local --test"
   },
@@ -24,6 +25,7 @@
   },
   "dependencies": {
     "dotenv": "^17.2.2",
+    "jsdom": "^27.0.0",
     "open": "^10.2.0"
   }
 }
