@@ -79,21 +79,67 @@ async function handleTelegramWebhook(request, env, ctx) {
 
 /**
  * Extract Spotify URLs from text (tracks, albums, playlists)
+ * Supports both open.spotify.com and spotify.link short URLs
  */
 function extractSpotifyLinks(text) {
   const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
+  const spotifyShortLinkRegex = /https?:\/\/spotify\.link\/([a-zA-Z0-9]+)/g;
   const links = [];
   let match;
-  
+
+  // Extract regular open.spotify.com links
   while ((match = spotifyLinkRegex.exec(text)) !== null) {
     links.push({
       url: match[0],
       type: match[1], // 'track', 'album', or 'playlist'
-      id: match[2]
+      id: match[2],
+      isShortLink: false
     });
   }
-  
+
+  // Extract spotify.link short links
+  while ((match = spotifyShortLinkRegex.exec(text)) !== null) {
+    links.push({
+      url: match[0],
+      shortId: match[1],
+      isShortLink: true
+    });
+  }
+
   return links;
+}
+
+/**
+ * Resolve Spotify short link to full URL
+ * Follows redirect from spotify.link to open.spotify.com
+ */
+async function resolveSpotifyShortLink(shortUrl) {
+  try {
+    const response = await fetch(shortUrl, {
+      method: 'HEAD',
+      redirect: 'manual' // Don't follow redirects automatically
+    });
+
+    const location = response.headers.get('location');
+    if (location) {
+      // Parse the redirected URL to extract type and ID
+      const match = location.match(/https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/);
+      if (match) {
+        return {
+          url: match[0],
+          type: match[1],
+          id: match[2],
+          isShortLink: false
+        };
+      }
+    }
+
+    console.error(`Failed to resolve short link: ${shortUrl}`);
+    return null;
+  } catch (error) {
+    console.error(`Error resolving short link ${shortUrl}:`, error);
+    return null;
+  }
 }
 
 /**
@@ -105,9 +151,31 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
     const spotifyAPI = new SpotifyAPI(tokenManager);
     const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
     const accessToken = await tokenManager.getAccessToken();
-    
+
+    // Resolve short links to full URLs
+    const resolvedLinks = [];
+    for (const link of spotifyLinks) {
+      if (link.isShortLink) {
+        console.log(`Resolving short link: ${link.url}`);
+        const resolved = await resolveSpotifyShortLink(link.url);
+        if (resolved) {
+          resolvedLinks.push(resolved);
+          console.log(`Resolved to: ${resolved.type}/${resolved.id}`);
+        } else {
+          console.error(`Failed to resolve short link: ${link.url}`);
+        }
+      } else {
+        resolvedLinks.push(link);
+      }
+    }
+
+    if (resolvedLinks.length === 0) {
+      console.log('No valid Spotify links to process after resolution');
+      return;
+    }
+
     // Separate tracks for playlist addition
-    const trackLinks = spotifyLinks.filter(link => link.type === 'track');
+    const trackLinks = resolvedLinks.filter(link => link.type === 'track');
     
     // Add tracks to playlist if any exist
     if (trackLinks.length > 0) {
@@ -120,7 +188,7 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
     const echoEnabled = env.SPOTIFY_ECHO_ENABLED === 'true';
 
     if (echoEnabled) {
-      for (const link of spotifyLinks) {
+      for (const link of resolvedLinks) {
         try {
           let contentInfo;
 
