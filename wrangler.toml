@@ -8,10 +8,15 @@ compatibility_date = "2024-09-20"
 binding = "SPOTIFY_TOKENS"
 id = "67c30aa1213f4ebebd237524ed92e3fa"
 
+[[kv_namespaces]]
+binding = "BOT_COMMENTS"
+id = "comment-storage-namespace-id"
+
 # Production environment configuration
 [env.production]
 kv_namespaces = [
-  { binding = "SPOTIFY_TOKENS", preview_id = "spotify-tokens-preview", id = "spotify-tokens-production" }
+  { binding = "SPOTIFY_TOKENS", preview_id = "spotify-tokens-preview", id = "spotify-tokens-production" },
+  { binding = "BOT_COMMENTS", preview_id = "bot-comments-preview", id = "bot-comments-production" }
 ]
 
 # Environment variables (non-secret)
@@ -19,14 +24,16 @@ kv_namespaces = [
 SPOTIFY_USER_ID = "patrick.auld"
 SPOTIFY_PLAYLIST_ID = "30VMMS6lOggdRImCEoWAxl"
 SPOTIFY_ECHO_ENABLED = false
+COMMENT_PROBABILITY = 0.0  # Probability [0.0, 1.0] of adding a comment to track info
 
 # Secrets (use: wrangler secret put <name>)
 # Run these commands to set secrets:
 # wrangler secret put SPOTIFY_CLIENT_ID
-# wrangler secret put SPOTIFY_CLIENT_SECRET  
+# wrangler secret put SPOTIFY_CLIENT_SECRET
 # wrangler secret put TELEGRAM_BOT_TOKEN
 # wrangler secret put SPOTIFY_ACCESS_TOKEN
 # wrangler secret put SPOTIFY_REFRESH_TOKEN
+# wrangler secret put COMMENT_ALLOWLIST  # Comma-separated list of user IDs allowed to add comments
 
 [observability.logs]
 enabled = true

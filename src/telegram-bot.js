@@ -120,30 +120,30 @@ export class TelegramBot {
   /**
    * Send Spotify content information (tracks, albums, playlists) as a reply to the original message
    */
-  async sendSpotifyInfo(contentInfo, contentType, originalMessage) {
+  async sendSpotifyInfo(contentInfo, contentType, originalMessage, comment = null) {
     try {
       const chatId = originalMessage.chat.id;
       const messageId = originalMessage.message_id;
 
       let caption;
-      
+
       switch (contentType) {
         case 'track':
           const artists = contentInfo.artists.join(', ');
           caption = `🎵 <b>${contentInfo.name}</b>\n👤 ${artists}\n💿 ${contentInfo.album}`;
           break;
-          
+
         case 'album':
           const albumArtists = contentInfo.artists.join(', ');
           caption = `💿 <b>${contentInfo.name}</b>\n👤 ${albumArtists}\n📅 ${contentInfo.release_date}\n🎵 ${contentInfo.track_count} tracks`;
           break;
-          
+
         case 'playlist':
           caption = `📃 <b>${contentInfo.name}</b>\n👤 by ${contentInfo.owner}\n🎵 ${contentInfo.track_count} tracks`;
           if (contentInfo.description) {
             // Truncate description if too long
-            const desc = contentInfo.description.length > 100 
-              ? contentInfo.description.substring(0, 100) + '...' 
+            const desc = contentInfo.description.length > 100
+              ? contentInfo.description.substring(0, 100) + '...'
               : contentInfo.description;
             caption += `\n📝 ${desc}`;
           }
@@ -151,9 +151,14 @@ export class TelegramBot {
             caption += `\n👥 ${contentInfo.followers} followers`;
           }
           break;
-          
+
         default:
           caption = `🎵 <b>${contentInfo.name}</b>`;
+      }
+
+      // Add comment if provided
+      if (comment) {
+        caption += `\n\n💬 ${comment}`;
       }
 
       if (contentInfo.artwork_url) {
@@ -170,11 +175,11 @@ export class TelegramBot {
 
     } catch (error) {
       console.error(`Error sending ${contentType} info:`, error);
-      
+
       // Fallback: try to send just text without photo
       try {
         const fallbackText = `🎵 ${contentInfo.name}`;
-        
+
         return await this.sendMessage(originalMessage.chat.id, fallbackText, {
           reply_to_message_id: originalMessage.message_id
         });
