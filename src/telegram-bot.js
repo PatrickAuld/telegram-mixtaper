@@ -158,7 +158,7 @@ export class TelegramBot {
 
       // Add comment if provided
       if (comment) {
-        caption += `\n\n💬 ${comment}`;
+        caption += `\n\n${comment}`;
       }
 
       if (contentInfo.artwork_url) {
