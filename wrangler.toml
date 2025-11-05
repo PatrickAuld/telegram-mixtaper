@@ -19,6 +19,7 @@ kv_namespaces = [
 SPOTIFY_USER_ID = "patrick.auld"
 SPOTIFY_PLAYLIST_ID = "30VMMS6lOggdRImCEoWAxl"
 SPOTIFY_ECHO_ENABLED = false
+WORKER_URL = "https://telegram-mixtaper.patrick-auld.workers.dev"
 
 # Secrets (use: wrangler secret put <name>)
 # Run these commands to set secrets:

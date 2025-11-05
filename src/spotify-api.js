@@ -128,11 +128,15 @@ export class SpotifyAPI {
 
   /**
    * Add tracks to a Spotify playlist
+   * @param {string[]} trackUris - Array of Spotify track URIs
+   * @param {string} accessToken - User or bot access token
+   * @param {object} env - Environment variables
+   * @param {string} spotifyUserId - Optional Spotify user ID for logging attribution
    */
-  async addTracksToPlaylist(trackUris, accessToken, env) {
+  async addTracksToPlaylist(trackUris, accessToken, env, spotifyUserId = null) {
     try {
       const playlistId = env.SPOTIFY_PLAYLIST_ID;
-      
+
       if (!playlistId) {
         throw new Error('SPOTIFY_PLAYLIST_ID not configured');
       }
@@ -156,50 +160,14 @@ export class SpotifyAPI {
       }
 
       const result = await response.json();
-      console.log(`Successfully added ${trackUris.length} tracks to playlist`);
-      
+      const attribution = spotifyUserId ? ` (added by ${spotifyUserId})` : '';
+      console.log(`Successfully added ${trackUris.length} tracks to playlist${attribution}`);
+
       return result;
 
     } catch (error) {
       console.error('Error adding tracks to playlist:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Get playlist information
-   */
-  async getPlaylistInfo(playlistId, accessToken) {
-    try {
-      const response = await fetch(`${this.baseURL}/playlists/${playlistId}`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to get playlist info: ${response.status}`);
-      }
-
-      const playlist = await response.json();
-      
-      return {
-        id: playlist.id,
-        name: playlist.name,
-        description: playlist.description,
-        public: playlist.public,
-        collaborative: playlist.collaborative,
-        tracks: {
-          total: playlist.tracks.total
-        },
-        external_urls: playlist.external_urls,
-        images: playlist.images
-      };
-
-    } catch (error) {
-      console.error('Error getting playlist info:', error);
-      return null;
     }
   }
 
