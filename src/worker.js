@@ -116,30 +116,36 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
       console.log(`Added ${trackUris.length} tracks to playlist`);
     }
     
-    // Send info for each Spotify item (tracks, albums, playlists)
-    for (const link of spotifyLinks) {
-      try {
-        let contentInfo;
-        
-        switch (link.type) {
-          case 'track':
-            contentInfo = await spotifyAPI.getTrackInfo(link.id, accessToken);
-            break;
-          case 'album':
-            contentInfo = await spotifyAPI.getAlbumInfo(link.id, accessToken);
-            break;
-          case 'playlist':
-            contentInfo = await spotifyAPI.getPlaylistInfo(link.id, accessToken);
-            break;
+    // Send info for each Spotify item (tracks, albums, playlists) - only if echo is enabled
+    const echoEnabled = env.SPOTIFY_ECHO_ENABLED === 'true';
+
+    if (echoEnabled) {
+      for (const link of spotifyLinks) {
+        try {
+          let contentInfo;
+
+          switch (link.type) {
+            case 'track':
+              contentInfo = await spotifyAPI.getTrackInfo(link.id, accessToken);
+              break;
+            case 'album':
+              contentInfo = await spotifyAPI.getAlbumInfo(link.id, accessToken);
+              break;
+            case 'playlist':
+              contentInfo = await spotifyAPI.getPlaylistInfo(link.id, accessToken);
+              break;
+          }
+
+          if (contentInfo) {
+            await telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
+            console.log(`Sent ${link.type} info for: ${contentInfo.name}`);
+          }
+        } catch (error) {
+          console.error(`Error processing ${link.type} ${link.id}:`, error);
         }
-        
-        if (contentInfo) {
-          await telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
-          console.log(`Sent ${link.type} info for: ${contentInfo.name}`);
-        }
-      } catch (error) {
-        console.error(`Error processing ${link.type} ${link.id}:`, error);
       }
+    } else {
+      console.log(`Skipped sending Spotify info (SPOTIFY_ECHO_ENABLED=${env.SPOTIFY_ECHO_ENABLED})`);
     }
     
   } catch (error) {
