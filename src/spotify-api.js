@@ -129,12 +129,10 @@ export class SpotifyAPI {
   /**
    * Add tracks to a Spotify playlist
    */
-  async addTracksToPlaylist(trackUris, accessToken, env) {
+  async addTracksToPlaylist(trackUris, accessToken, playlistId) {
     try {
-      const playlistId = env.SPOTIFY_PLAYLIST_ID;
-      
       if (!playlistId) {
-        throw new Error('SPOTIFY_PLAYLIST_ID not configured');
+        throw new Error('No playlist ID provided');
       }
 
       // Add tracks to the beginning of the playlist
@@ -156,8 +154,8 @@ export class SpotifyAPI {
       }
 
       const result = await response.json();
-      console.log(`Successfully added ${trackUris.length} tracks to playlist`);
-      
+      console.log(`Successfully added ${trackUris.length} tracks to playlist ${playlistId}`);
+
       return result;
 
     } catch (error) {
@@ -206,12 +204,10 @@ export class SpotifyAPI {
   /**
    * Check if tracks already exist in playlist (to avoid duplicates)
    */
-  async checkTracksInPlaylist(trackIds, accessToken, env) {
+  async checkTracksInPlaylist(trackIds, accessToken, playlistId) {
     try {
-      const playlistId = env.SPOTIFY_PLAYLIST_ID;
-      
       if (!playlistId) {
-        throw new Error('SPOTIFY_PLAYLIST_ID not configured');
+        throw new Error('No playlist ID provided');
       }
 
       // Get playlist tracks (first 50 items)

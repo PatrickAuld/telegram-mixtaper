@@ -33,8 +33,11 @@ class LocalDevBot {
       SPOTIFY_PLAYLIST_ID: process.env.SPOTIFY_PLAYLIST_ID,
       SPOTIFY_USER_ID: process.env.SPOTIFY_USER_ID,
       TELEGRAM_ERROR_CHANNEL: process.env.TELEGRAM_ERROR_CHANNEL,
-      // Mock KV store using local storage (in memory for dev)
-      SPOTIFY_TOKENS: new MockKVStore()
+      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+      SPOTIFY_ECHO_ENABLED: process.env.SPOTIFY_ECHO_ENABLED,
+      // Mock KV stores using local storage (in memory for dev)
+      SPOTIFY_TOKENS: new MockKVStore(),
+      CHANNEL_PLAYLISTS: new MockKVStore()
     };
   }
 
@@ -45,7 +48,7 @@ class LocalDevBot {
     const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
     const links = [];
     let match;
-    
+
     while ((match = spotifyLinkRegex.exec(text)) !== null) {
       links.push({
         url: match[0],
@@ -53,8 +56,167 @@ class LocalDevBot {
         id: match[2]
       });
     }
-    
+
     return links;
+  }
+
+  /**
+   * Extract Spotify playlist ID from URL or return ID if already in ID format
+   */
+  extractPlaylistId(input) {
+    if (!input) return null;
+
+    // Check if it's already a playlist ID (22 alphanumeric characters)
+    if (/^[a-zA-Z0-9]{22}$/.test(input.trim())) {
+      return input.trim();
+    }
+
+    // Try to extract from Spotify URL
+    const playlistRegex = /(?:open\.spotify\.com\/playlist\/|spotify:playlist:)([a-zA-Z0-9]{22})/;
+    const match = input.match(playlistRegex);
+
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Check if user is an admin in the channel/group
+   */
+  async isUserAdmin(chatId, userId) {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${this.botToken}/getChatMember`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          user_id: userId
+        })
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to check admin status: ${response.status}`);
+        return false;
+      }
+
+      const data = await response.json();
+      const status = data.result?.status;
+
+      // Admin statuses: creator, administrator
+      return status === 'creator' || status === 'administrator';
+    } catch (error) {
+      console.error('Error checking admin status:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get playlist ID for a channel (channel-specific or default)
+   */
+  async getPlaylistIdForChannel(chatId) {
+    try {
+      // Try to get channel-specific playlist from KV
+      const channelKey = `channel:${chatId}`;
+      const channelPlaylistId = await this.spotifyTokenManager.env.CHANNEL_PLAYLISTS.get(channelKey);
+
+      if (channelPlaylistId) {
+        console.log(`📝 Using channel-specific playlist: ${channelPlaylistId}`);
+        return channelPlaylistId;
+      }
+
+      // Fall back to default playlist
+      console.log(`📝 Using default playlist: ${this.spotifyTokenManager.env.SPOTIFY_PLAYLIST_ID}`);
+      return this.spotifyTokenManager.env.SPOTIFY_PLAYLIST_ID;
+    } catch (error) {
+      console.error('Error getting playlist for channel:', error);
+      // Fall back to default on error
+      return this.spotifyTokenManager.env.SPOTIFY_PLAYLIST_ID;
+    }
+  }
+
+  /**
+   * Handle /setplaylist command
+   */
+  async handleSetPlaylistCommand(message) {
+    const chatId = message.chat.id;
+    const userId = message.from.id;
+    const text = message.text;
+
+    try {
+      // Check if user is admin
+      const isAdmin = await this.isUserAdmin(chatId, userId);
+
+      if (!isAdmin) {
+        await this.telegramBot.sendMessage(
+          chatId,
+          '❌ Only channel/group administrators can set the playlist.',
+          { reply_to_message_id: message.message_id }
+        );
+        return;
+      }
+
+      // Extract playlist URL/ID from command
+      const parts = text.split(/\s+/);
+
+      if (parts.length < 2) {
+        await this.telegramBot.sendMessage(
+          chatId,
+          '❌ Please provide a Spotify playlist URL or ID.\n\n' +
+          'Usage: /setplaylist <playlist_url>\n' +
+          'Example: /setplaylist https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+          { reply_to_message_id: message.message_id }
+        );
+        return;
+      }
+
+      const playlistInput = parts.slice(1).join(' ').trim();
+      const playlistId = this.extractPlaylistId(playlistInput);
+
+      if (!playlistId) {
+        await this.telegramBot.sendMessage(
+          chatId,
+          '❌ Invalid Spotify playlist URL or ID.\n\n' +
+          'Please provide a valid Spotify playlist URL or a 22-character playlist ID.',
+          { reply_to_message_id: message.message_id }
+        );
+        return;
+      }
+
+      // Verify playlist exists by fetching its info
+      const accessToken = await this.spotifyTokenManager.getAccessToken();
+      const playlistInfo = await this.spotifyAPI.getPlaylistInfo(playlistId, accessToken);
+
+      if (!playlistInfo) {
+        await this.telegramBot.sendMessage(
+          chatId,
+          '❌ Could not find the specified playlist. Please check the URL/ID and try again.',
+          { reply_to_message_id: message.message_id }
+        );
+        return;
+      }
+
+      // Store channel-playlist mapping in KV
+      const channelKey = `channel:${chatId}`;
+      await this.spotifyTokenManager.env.CHANNEL_PLAYLISTS.put(channelKey, playlistId);
+
+      console.log(`✅ Set playlist ${playlistId} for channel ${chatId}`);
+
+      // Send confirmation
+      await this.telegramBot.sendMessage(
+        chatId,
+        `✅ Playlist set successfully!\n\n` +
+        `📃 <b>${playlistInfo.name}</b>\n` +
+        `🎵 ${playlistInfo.tracks.total} tracks\n\n` +
+        `All Spotify track links in this ${message.chat.type} will now be added to this playlist.`,
+        { reply_to_message_id: message.message_id }
+      );
+
+    } catch (error) {
+      console.error('❌ Error handling /setplaylist command:', error);
+      await this.telegramBot.sendMessage(
+        chatId,
+        '❌ An error occurred while setting the playlist. Please try again later.',
+        { reply_to_message_id: message.message_id }
+      );
+    }
   }
 
   /**
@@ -66,45 +228,54 @@ class LocalDevBot {
 
       // Separate tracks for playlist addition
       const trackLinks = spotifyLinks.filter(link => link.type === 'track');
-      
+
       // Add tracks to playlist if any exist
       if (trackLinks.length > 0) {
+        // Get playlist ID for this channel
+        const playlistId = await this.getPlaylistIdForChannel(message.chat.id);
+
         const trackUris = trackLinks.map(link => `spotify:track:${link.id}`);
         const accessToken = await this.spotifyTokenManager.getAccessToken();
-        await this.spotifyAPI.addTracksToPlaylist(trackUris, accessToken, this.spotifyTokenManager.env);
-        console.log(`✅ Added ${trackUris.length} tracks to playlist`);
+        await this.spotifyAPI.addTracksToPlaylist(trackUris, accessToken, playlistId);
+        console.log(`✅ Added ${trackUris.length} tracks to playlist ${playlistId}`);
       }
-      
-      // Send info for each Spotify item (tracks, albums, playlists)
-      const accessToken = await this.spotifyTokenManager.getAccessToken();
-      for (const link of spotifyLinks) {
-        try {
-          let contentInfo;
-          
-          switch (link.type) {
-            case 'track':
-              contentInfo = await this.spotifyAPI.getTrackInfo(link.id, accessToken);
-              break;
-            case 'album':
-              contentInfo = await this.spotifyAPI.getAlbumInfo(link.id, accessToken);
-              break;
-            case 'playlist':
-              contentInfo = await this.spotifyAPI.getPlaylistInfo(link.id, accessToken);
-              break;
+
+      // Send info for each Spotify item (tracks, albums, playlists) - only if echo is enabled
+      const echoEnabled = this.spotifyTokenManager.env.SPOTIFY_ECHO_ENABLED === 'true';
+
+      if (echoEnabled) {
+        const accessToken = await this.spotifyTokenManager.getAccessToken();
+        for (const link of spotifyLinks) {
+          try {
+            let contentInfo;
+
+            switch (link.type) {
+              case 'track':
+                contentInfo = await this.spotifyAPI.getTrackInfo(link.id, accessToken);
+                break;
+              case 'album':
+                contentInfo = await this.spotifyAPI.getAlbumInfo(link.id, accessToken);
+                break;
+              case 'playlist':
+                contentInfo = await this.spotifyAPI.getPlaylistInfo(link.id, accessToken);
+                break;
+            }
+
+            if (contentInfo) {
+              await this.telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
+              console.log(`✅ Sent ${link.type} info for: ${contentInfo.name}`);
+            }
+          } catch (error) {
+            console.error(`❌ Error processing ${link.type} ${link.id}:`, error.message);
           }
-          
-          if (contentInfo) {
-            await this.telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
-            console.log(`✅ Sent ${link.type} info for: ${contentInfo.name}`);
-          }
-        } catch (error) {
-          console.error(`❌ Error processing ${link.type} ${link.id}:`, error.message);
         }
+      } else {
+        console.log(`ℹ️  Skipped sending Spotify info (SPOTIFY_ECHO_ENABLED=${this.spotifyTokenManager.env.SPOTIFY_ECHO_ENABLED})`);
       }
-      
+
     } catch (error) {
       console.error('❌ Error processing Spotify links:', error);
-      
+
       // Send error to Telegram if error channel is configured
       if (process.env.TELEGRAM_ERROR_CHANNEL) {
         try {
@@ -122,24 +293,33 @@ class LocalDevBot {
   async processUpdate(update) {
     try {
       console.log('📨 Received update:', update.update_id);
-      
+
       // Only process messages with text
       if (!update.message || !update.message.text) {
         return;
       }
-      
+
       const message = update.message;
-      const spotifyLinks = this.extractSpotifyLinks(message.text);
-      
+      const text = message.text;
+
+      // Check for /setplaylist command
+      if (text.startsWith('/setplaylist')) {
+        console.log('🔧 Processing /setplaylist command');
+        await this.handleSetPlaylistCommand(message);
+        return;
+      }
+
+      const spotifyLinks = this.extractSpotifyLinks(text);
+
       if (spotifyLinks.length === 0) {
         return;
       }
-      
+
       console.log(`🎵 Found ${spotifyLinks.length} Spotify links:`, spotifyLinks.map(l => `${l.type}:${l.id}`));
-      
+
       // Process Spotify links
       await this.processSpotifyLinks(spotifyLinks, message);
-      
+
     } catch (error) {
       console.error('❌ Error processing update:', error);
     }

@@ -8,6 +8,11 @@ compatibility_date = "2024-09-20"
 binding = "SPOTIFY_TOKENS"
 id = "67c30aa1213f4ebebd237524ed92e3fa"
 
+# KV Namespace for channel-specific playlist mappings
+[[kv_namespaces]]
+binding = "CHANNEL_PLAYLISTS"
+id = "channel-playlists-dev"
+
 # Production environment configuration
 [env.production]
 kv_namespaces = [
