@@ -78,20 +78,20 @@ async function handleTelegramWebhook(request, env, ctx) {
 }
 
 /**
- * Extract Spotify URLs from text (tracks, albums, playlists)
+ * Extract Spotify URLs from text (tracks and albums only)
  * Supports both open.spotify.com and spotify.link short URLs
  */
 function extractSpotifyLinks(text) {
-  const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
+  const spotifyLinkRegex = /https?:\/\/open\.spotify\.com\/(track|album)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
   const spotifyShortLinkRegex = /https?:\/\/spotify\.link\/([a-zA-Z0-9]+)/g;
   const links = [];
   let match;
 
-  // Extract regular open.spotify.com links
+  // Extract regular open.spotify.com links (tracks and albums only)
   while ((match = spotifyLinkRegex.exec(text)) !== null) {
     links.push({
       url: match[0],
-      type: match[1], // 'track', 'album', or 'playlist'
+      type: match[1], // 'track' or 'album'
       id: match[2],
       isShortLink: false
     });
@@ -112,6 +112,7 @@ function extractSpotifyLinks(text) {
 /**
  * Resolve Spotify short link to full URL
  * Follows redirect from spotify.link to open.spotify.com
+ * Only accepts tracks and albums (ignores playlists)
  */
 async function resolveSpotifyShortLink(shortUrl) {
   try {
@@ -122,8 +123,8 @@ async function resolveSpotifyShortLink(shortUrl) {
 
     const location = response.headers.get('location');
     if (location) {
-      // Parse the redirected URL to extract type and ID
-      const match = location.match(/https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/);
+      // Parse the redirected URL to extract type and ID (tracks and albums only)
+      const match = location.match(/https?:\/\/open\.spotify\.com\/(track|album)\/([a-zA-Z0-9]+)/);
       if (match) {
         return {
           url: match[0],
@@ -131,6 +132,9 @@ async function resolveSpotifyShortLink(shortUrl) {
           id: match[2],
           isShortLink: false
         };
+      } else if (location.includes('/playlist/')) {
+        console.log(`Ignoring playlist link: ${shortUrl}`);
+        return null;
       }
     }
 
@@ -174,7 +178,7 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
       return;
     }
 
-    // Collect all track IDs from tracks, albums, and playlists
+    // Collect all track IDs from tracks and albums
     const allTrackIds = [];
 
     for (const link of resolvedLinks) {
@@ -185,11 +189,6 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
         const albumTrackIds = await spotifyAPI.getAlbumTracks(link.id, accessToken);
         allTrackIds.push(...albumTrackIds);
         console.log(`Found ${albumTrackIds.length} tracks in album`);
-      } else if (link.type === 'playlist') {
-        console.log(`Extracting tracks from playlist: ${link.id}`);
-        const playlistTrackIds = await spotifyAPI.getPlaylistTracks(link.id, accessToken);
-        allTrackIds.push(...playlistTrackIds);
-        console.log(`Found ${playlistTrackIds.length} tracks in playlist`);
       }
     }
 
@@ -200,7 +199,7 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
       console.log(`Added ${trackUris.length} tracks to playlist`);
     }
     
-    // Send info for each Spotify item (tracks, albums, playlists) - only if echo is enabled
+    // Send info for each Spotify item (tracks and albums only) - only if echo is enabled
     const echoEnabled = env.SPOTIFY_ECHO_ENABLED === 'true';
 
     if (echoEnabled) {
@@ -214,9 +213,6 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
               break;
             case 'album':
               contentInfo = await spotifyAPI.getAlbumInfo(link.id, accessToken);
-              break;
-            case 'playlist':
-              contentInfo = await spotifyAPI.getPlaylistInfo(link.id, accessToken);
               break;
           }
 
