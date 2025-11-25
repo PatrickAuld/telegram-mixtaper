@@ -174,12 +174,28 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
       return;
     }
 
-    // Separate tracks for playlist addition
-    const trackLinks = resolvedLinks.filter(link => link.type === 'track');
-    
-    // Add tracks to playlist if any exist
-    if (trackLinks.length > 0) {
-      const trackUris = trackLinks.map(link => `spotify:track:${link.id}`);
+    // Collect all track IDs from tracks, albums, and playlists
+    const allTrackIds = [];
+
+    for (const link of resolvedLinks) {
+      if (link.type === 'track') {
+        allTrackIds.push(link.id);
+      } else if (link.type === 'album') {
+        console.log(`Extracting tracks from album: ${link.id}`);
+        const albumTrackIds = await spotifyAPI.getAlbumTracks(link.id, accessToken);
+        allTrackIds.push(...albumTrackIds);
+        console.log(`Found ${albumTrackIds.length} tracks in album`);
+      } else if (link.type === 'playlist') {
+        console.log(`Extracting tracks from playlist: ${link.id}`);
+        const playlistTrackIds = await spotifyAPI.getPlaylistTracks(link.id, accessToken);
+        allTrackIds.push(...playlistTrackIds);
+        console.log(`Found ${playlistTrackIds.length} tracks in playlist`);
+      }
+    }
+
+    // Add all collected tracks to the target playlist
+    if (allTrackIds.length > 0) {
+      const trackUris = allTrackIds.map(id => `spotify:track:${id}`);
       await spotifyAPI.addTracksToPlaylist(trackUris, accessToken, env);
       console.log(`Added ${trackUris.length} tracks to playlist`);
     }

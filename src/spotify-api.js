@@ -63,7 +63,7 @@ export class SpotifyAPI {
       }
 
       const album = await response.json();
-      
+
       // Extract relevant information
       return {
         id: album.id,
@@ -72,8 +72,8 @@ export class SpotifyAPI {
         type: 'album',
         track_count: album.total_tracks,
         release_date: album.release_date,
-        artwork_url: album.images && album.images.length > 0 
-          ? album.images[0].url 
+        artwork_url: album.images && album.images.length > 0
+          ? album.images[0].url
           : null,
         external_urls: album.external_urls,
         genres: album.genres || []
@@ -82,6 +82,50 @@ export class SpotifyAPI {
     } catch (error) {
       console.error(`Error getting album info for ${albumId}:`, error);
       return null;
+    }
+  }
+
+  /**
+   * Get all track IDs from an album
+   */
+  async getAlbumTracks(albumId, accessToken) {
+    try {
+      const response = await fetch(`${this.baseURL}/albums/${albumId}/tracks?limit=50`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Spotify API error: ${response.status} - ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const trackIds = data.items.map(track => track.id);
+
+      // Handle pagination if album has more than 50 tracks
+      let nextUrl = data.next;
+      while (nextUrl) {
+        const nextResponse = await fetch(nextUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!nextResponse.ok) break;
+
+        const nextData = await nextResponse.json();
+        trackIds.push(...nextData.items.map(track => track.id));
+        nextUrl = nextData.next;
+      }
+
+      return trackIds;
+
+    } catch (error) {
+      console.error(`Error getting album tracks for ${albumId}:`, error);
+      return [];
     }
   }
 
@@ -102,7 +146,7 @@ export class SpotifyAPI {
       }
 
       const playlist = await response.json();
-      
+
       // Extract relevant information
       return {
         id: playlist.id,
@@ -113,8 +157,8 @@ export class SpotifyAPI {
         track_count: playlist.tracks.total,
         public: playlist.public,
         collaborative: playlist.collaborative,
-        artwork_url: playlist.images && playlist.images.length > 0 
-          ? playlist.images[0].url 
+        artwork_url: playlist.images && playlist.images.length > 0
+          ? playlist.images[0].url
           : null,
         external_urls: playlist.external_urls,
         followers: playlist.followers?.total || 0
@@ -123,6 +167,55 @@ export class SpotifyAPI {
     } catch (error) {
       console.error(`Error getting playlist info for ${playlistId}:`, error);
       return null;
+    }
+  }
+
+  /**
+   * Get all track IDs from a playlist
+   */
+  async getPlaylistTracks(playlistId, accessToken) {
+    try {
+      const response = await fetch(`${this.baseURL}/playlists/${playlistId}/tracks?limit=50&fields=items(track(id))`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Spotify API error: ${response.status} - ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const trackIds = data.items
+        .filter(item => item.track && item.track.id) // Filter out null tracks
+        .map(item => item.track.id);
+
+      // Handle pagination if playlist has more than 50 tracks
+      let nextUrl = data.next;
+      while (nextUrl) {
+        const nextResponse = await fetch(nextUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!nextResponse.ok) break;
+
+        const nextData = await nextResponse.json();
+        const moreTracks = nextData.items
+          .filter(item => item.track && item.track.id)
+          .map(item => item.track.id);
+        trackIds.push(...moreTracks);
+        nextUrl = nextData.next;
+      }
+
+      return trackIds;
+
+    } catch (error) {
+      console.error(`Error getting playlist tracks for ${playlistId}:`, error);
+      return [];
     }
   }
 
