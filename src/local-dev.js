@@ -141,18 +141,6 @@ class LocalDevBot {
     const text = message.text;
 
     try {
-      // Check if user is admin
-      const isAdmin = await this.isUserAdmin(chatId, userId);
-
-      if (!isAdmin) {
-        await this.telegramBot.sendMessage(
-          chatId,
-          '❌ Only channel/group administrators can set the playlist.',
-          { reply_to_message_id: message.message_id }
-        );
-        return;
-      }
-
       // Extract playlist URL/ID from command
       const parts = text.split(/\s+/);
 

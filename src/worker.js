@@ -175,18 +175,6 @@ async function handleSetPlaylistCommand(message, env) {
   const text = message.text;
 
   try {
-    // Check if user is admin
-    const isAdmin = await isUserAdmin(chatId, userId, env.TELEGRAM_BOT_TOKEN);
-
-    if (!isAdmin) {
-      await telegramBot.sendMessage(
-        chatId,
-        '❌ Only channel/group administrators can set the playlist.',
-        { reply_to_message_id: message.message_id }
-      );
-      return;
-    }
-
     // Extract playlist URL/ID from command
     // Format: /setplaylist <URL or ID>
     const parts = text.split(/\s+/);
