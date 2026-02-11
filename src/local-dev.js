@@ -8,6 +8,7 @@
 import { SpotifyTokenManager } from './spotify-token-manager.js';
 import { TelegramBot } from './telegram-bot.js';
 import { SpotifyAPI } from './spotify-api.js';
+import { extractYouTubeMusicLinks, getYouTubeMusicTrackInfo } from './youtube-music.js';
 import * as dotenv from 'dotenv';
 
 // Load environment variables
@@ -58,57 +59,104 @@ class LocalDevBot {
   }
 
   /**
-   * Process Spotify links - add tracks to playlist and send content info
+   * Process Spotify + YouTube Music links.
    */
-  async processSpotifyLinks(spotifyLinks, message) {
+  async processLinks({ spotifyLinks, ytLinks }, message) {
     try {
-      console.log(`Processing ${spotifyLinks.length} Spotify links...`);
+      if (spotifyLinks.length > 0) {
+        console.log(`Processing ${spotifyLinks.length} Spotify links...`);
 
-      // Separate tracks for playlist addition
-      const trackLinks = spotifyLinks.filter(link => link.type === 'track');
-      
-      // Add tracks to playlist if any exist
-      if (trackLinks.length > 0) {
-        const trackUris = trackLinks.map(link => `spotify:track:${link.id}`);
+        // Separate tracks for playlist addition
+        const trackLinks = spotifyLinks.filter((link) => link.type === 'track');
+
+        if (trackLinks.length > 0) {
+          const trackUris = trackLinks.map((link) => `spotify:track:${link.id}`);
+          const accessToken = await this.spotifyTokenManager.getAccessToken();
+          await this.spotifyAPI.addTracksToPlaylist(
+            trackUris,
+            accessToken,
+            this.spotifyTokenManager.env
+          );
+          console.log(`✅ Added ${trackUris.length} tracks to playlist`);
+        }
+
+        // Send info for each Spotify item (tracks, albums, playlists)
         const accessToken = await this.spotifyTokenManager.getAccessToken();
-        await this.spotifyAPI.addTracksToPlaylist(trackUris, accessToken, this.spotifyTokenManager.env);
-        console.log(`✅ Added ${trackUris.length} tracks to playlist`);
-      }
-      
-      // Send info for each Spotify item (tracks, albums, playlists)
-      const accessToken = await this.spotifyTokenManager.getAccessToken();
-      for (const link of spotifyLinks) {
-        try {
-          let contentInfo;
-          
-          switch (link.type) {
-            case 'track':
-              contentInfo = await this.spotifyAPI.getTrackInfo(link.id, accessToken);
-              break;
-            case 'album':
-              contentInfo = await this.spotifyAPI.getAlbumInfo(link.id, accessToken);
-              break;
-            case 'playlist':
-              contentInfo = await this.spotifyAPI.getPlaylistInfo(link.id, accessToken);
-              break;
+        for (const link of spotifyLinks) {
+          try {
+            let contentInfo;
+
+            switch (link.type) {
+              case 'track':
+                contentInfo = await this.spotifyAPI.getTrackInfo(link.id, accessToken);
+                break;
+              case 'album':
+                contentInfo = await this.spotifyAPI.getAlbumInfo(link.id, accessToken);
+                break;
+              case 'playlist':
+                contentInfo = await this.spotifyAPI.getPlaylistInfo(link.id, accessToken);
+                break;
+            }
+
+            if (contentInfo) {
+              await this.telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
+              console.log(`✅ Sent ${link.type} info for: ${contentInfo.name}`);
+            }
+          } catch (error) {
+            console.error(`❌ Error processing ${link.type} ${link.id}:`, error.message);
           }
-          
-          if (contentInfo) {
-            await this.telegramBot.sendSpotifyInfo(contentInfo, link.type, message);
-            console.log(`✅ Sent ${link.type} info for: ${contentInfo.name}`);
-          }
-        } catch (error) {
-          console.error(`❌ Error processing ${link.type} ${link.id}:`, error.message);
         }
       }
-      
+
+      if (ytLinks.length > 0) {
+        console.log(`Processing ${ytLinks.length} YouTube links...`);
+
+        const ytTrackUris = [];
+        for (const link of ytLinks) {
+          const info = await getYouTubeMusicTrackInfo(link.url);
+          if (!info) continue;
+
+          const accessToken = await this.spotifyTokenManager.getAccessToken();
+          const match = await this.spotifyAPI.searchTrack(
+            { title: info.title, artist: info.artist },
+            accessToken
+          );
+
+          if (!match) continue;
+
+          ytTrackUris.push(match.uri);
+
+          // Echo using Spotify info
+          try {
+            const contentInfo = await this.spotifyAPI.getTrackInfo(match.id, accessToken);
+            if (contentInfo) {
+              await this.telegramBot.sendSpotifyInfo(contentInfo, 'track', message);
+            }
+          } catch (e) {
+            console.error('❌ Error sending echo for YT match:', e.message);
+          }
+        }
+
+        if (ytTrackUris.length > 0) {
+          const accessToken = await this.spotifyTokenManager.getAccessToken();
+          await this.spotifyAPI.addTracksToPlaylist(
+            ytTrackUris,
+            accessToken,
+            this.spotifyTokenManager.env
+          );
+          console.log(`✅ Added ${ytTrackUris.length} tracks from YouTube to playlist`);
+        }
+      }
     } catch (error) {
-      console.error('❌ Error processing Spotify links:', error);
-      
-      // Send error to Telegram if error channel is configured
+      console.error('❌ Error processing links:', error);
+
       if (process.env.TELEGRAM_ERROR_CHANNEL) {
         try {
-          await this.telegramBot.sendErrorNotification(this.spotifyTokenManager.env, error, 'Processing Spotify links');
+          await this.telegramBot.sendErrorNotification(
+            this.spotifyTokenManager.env,
+            error,
+            'Processing links'
+          );
         } catch (telegramError) {
           console.error('❌ Failed to send error to Telegram:', telegramError.message);
         }
@@ -130,15 +178,20 @@ class LocalDevBot {
       
       const message = update.message;
       const spotifyLinks = this.extractSpotifyLinks(message.text);
-      
-      if (spotifyLinks.length === 0) {
+      const ytLinks = extractYouTubeMusicLinks(message.text);
+
+      if (spotifyLinks.length === 0 && ytLinks.length === 0) {
         return;
       }
-      
-      console.log(`🎵 Found ${spotifyLinks.length} Spotify links:`, spotifyLinks.map(l => `${l.type}:${l.id}`));
-      
-      // Process Spotify links
-      await this.processSpotifyLinks(spotifyLinks, message);
+
+      if (spotifyLinks.length > 0) {
+        console.log(`🎵 Found ${spotifyLinks.length} Spotify links:`, spotifyLinks.map(l => `${l.type}:${l.id}`));
+      }
+      if (ytLinks.length > 0) {
+        console.log(`▶️ Found ${ytLinks.length} YouTube links`);
+      }
+
+      await this.processLinks({ spotifyLinks, ytLinks }, message);
       
     } catch (error) {
       console.error('❌ Error processing update:', error);

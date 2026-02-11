@@ -9,6 +9,45 @@ export class SpotifyAPI {
   }
 
   /**
+   * Search Spotify for a track by title/artist and return the best match.
+   */
+  async searchTrack({ title, artist }, accessToken) {
+    try {
+      if (!title) return null;
+
+      // Use Spotify's advanced query syntax for better precision.
+      const qParts = [];
+      qParts.push(`track:${title}`);
+      if (artist) qParts.push(`artist:${artist}`);
+
+      const params = new URLSearchParams({
+        q: qParts.join(' '),
+        type: 'track',
+        limit: '1'
+      });
+
+      const response = await fetch(`${this.baseURL}/search?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Spotify search error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      const item = data?.tracks?.items?.[0];
+      return item ?? null;
+    } catch (error) {
+      console.error('Error searching for track:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get track information from Spotify
    */
   async getTrackInfo(trackId, accessToken) {

@@ -6,42 +6,48 @@
 import { SpotifyTokenManager } from './spotify-token-manager.js';
 import { TelegramBot } from './telegram-bot.js';
 import { SpotifyAPI } from './spotify-api.js';
+import { extractYouTubeMusicLinks, getYouTubeMusicTrackInfo } from './youtube-music.js';
 
 export default {
   async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);
-      
+
       // Health check endpoint
       if (request.method === 'GET' && url.pathname === '/') {
-        return new Response(JSON.stringify({
-          status: 'ok',
-          message: 'Telegram Mixtaper Bot is running',
-          timestamp: new Date().toISOString()
-        }), {
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(
+          JSON.stringify({
+            status: 'ok',
+            message: 'Telegram Mixtaper Bot is running',
+            timestamp: new Date().toISOString()
+          }),
+          {
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
       }
-      
+
       // Telegram webhook endpoint
       if (request.method === 'POST' && url.pathname === '/webhook') {
         return await handleTelegramWebhook(request, env, ctx);
       }
-      
+
       // 404 for all other routes
       return new Response('Not Found', { status: 404 });
-      
     } catch (error) {
       console.error('Worker error:', error);
-      return new Response(JSON.stringify({
-        error: 'Internal Server Error',
-        message: error.message
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return new Response(
+        JSON.stringify({
+          error: 'Internal Server Error',
+          message: error.message
+        }),
+        {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
     }
-  },
+  }
 };
 
 /**
@@ -51,26 +57,32 @@ async function handleTelegramWebhook(request, env, ctx) {
   try {
     const update = await request.json();
     console.log('Received Telegram update:', JSON.stringify(update));
-    
+
     // Only process messages with text
     if (!update.message || !update.message.text) {
       return new Response('OK', { status: 200 });
     }
-    
+
     const message = update.message;
     const spotifyLinks = extractSpotifyLinks(message.text);
-    
-    if (spotifyLinks.length === 0) {
+    const ytLinks = extractYouTubeMusicLinks(message.text);
+
+    if (spotifyLinks.length === 0 && ytLinks.length === 0) {
       return new Response('OK', { status: 200 });
     }
-    
-    console.log(`Found ${spotifyLinks.length} Spotify links:`, spotifyLinks);
-    
-    // Process Spotify links
-    ctx.waitUntil(processSpotifyLinks(spotifyLinks, message, env));
-    
+
+    if (spotifyLinks.length > 0) {
+      console.log(`Found ${spotifyLinks.length} Spotify links:`, spotifyLinks);
+    }
+
+    if (ytLinks.length > 0) {
+      console.log(`Found ${ytLinks.length} YouTube links:`, ytLinks);
+    }
+
+    // Process links
+    ctx.waitUntil(processLinks({ spotifyLinks, ytLinks }, message, env));
+
     return new Response('OK', { status: 200 });
-    
   } catch (error) {
     console.error('Webhook error:', error);
     return new Response('Error', { status: 500 });
@@ -123,7 +135,9 @@ async function resolveSpotifyShortLink(shortUrl) {
     const location = response.headers.get('location');
     if (location) {
       // Parse the redirected URL to extract type and ID
-      const match = location.match(/https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/);
+      const match = location.match(
+        /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/
+      );
       if (match) {
         return {
           url: match[0],
@@ -143,16 +157,16 @@ async function resolveSpotifyShortLink(shortUrl) {
 }
 
 /**
- * Process Spotify links - add tracks to playlist and send content info
+ * Process Spotify + YouTube Music links.
  */
-async function processSpotifyLinks(spotifyLinks, message, env) {
+async function processLinks({ spotifyLinks, ytLinks }, message, env) {
   try {
     const tokenManager = new SpotifyTokenManager(env);
     const spotifyAPI = new SpotifyAPI(tokenManager);
     const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
     const accessToken = await tokenManager.getAccessToken();
 
-    // Resolve short links to full URLs
+    // Resolve Spotify short links
     const resolvedLinks = [];
     for (const link of spotifyLinks) {
       if (link.isShortLink) {
@@ -169,24 +183,56 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
       }
     }
 
-    if (resolvedLinks.length === 0) {
-      console.log('No valid Spotify links to process after resolution');
-      return;
-    }
-
-    // Separate tracks for playlist addition
-    const trackLinks = resolvedLinks.filter(link => link.type === 'track');
-    
-    // Add tracks to playlist if any exist
+    // Add Spotify tracks
+    const trackLinks = resolvedLinks.filter((link) => link.type === 'track');
     if (trackLinks.length > 0) {
-      const trackUris = trackLinks.map(link => `spotify:track:${link.id}`);
+      const trackUris = trackLinks.map((link) => `spotify:track:${link.id}`);
       await spotifyAPI.addTracksToPlaylist(trackUris, accessToken, env);
-      console.log(`Added ${trackUris.length} tracks to playlist`);
+      console.log(`Added ${trackUris.length} Spotify tracks to playlist`);
     }
-    
-    // Send info for each Spotify item (tracks, albums, playlists) - only if echo is enabled
-    const echoEnabled = env.SPOTIFY_ECHO_ENABLED === 'true';
 
+    // Convert YouTube Music links → Spotify tracks
+    const ytTrackUris = [];
+    for (const link of ytLinks) {
+      const info = await getYouTubeMusicTrackInfo(link.url);
+      if (!info) {
+        console.error(`Could not extract track info from: ${link.url}`);
+        continue;
+      }
+
+      const match = await spotifyAPI.searchTrack(
+        { title: info.title, artist: info.artist },
+        accessToken
+      );
+
+      if (!match) {
+        console.log(`No Spotify match found for: ${info.artist ?? ''} ${info.title}`);
+        continue;
+      }
+
+      ytTrackUris.push(match.uri);
+
+      // Echo matched Spotify track
+      const echoEnabled = env.SPOTIFY_ECHO_ENABLED === 'true';
+      if (echoEnabled) {
+        try {
+          const contentInfo = await spotifyAPI.getTrackInfo(match.id, accessToken);
+          if (contentInfo) {
+            await telegramBot.sendSpotifyInfo(contentInfo, 'track', message);
+          }
+        } catch (e) {
+          console.error('Error sending Spotify info for YT match:', e);
+        }
+      }
+    }
+
+    if (ytTrackUris.length > 0) {
+      await spotifyAPI.addTracksToPlaylist(ytTrackUris, accessToken, env);
+      console.log(`Added ${ytTrackUris.length} tracks from YouTube to playlist`);
+    }
+
+    // Echo for Spotify items (tracks/albums/playlists)
+    const echoEnabled = env.SPOTIFY_ECHO_ENABLED === 'true';
     if (echoEnabled) {
       for (const link of resolvedLinks) {
         try {
@@ -212,18 +258,18 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
           console.error(`Error processing ${link.type} ${link.id}:`, error);
         }
       }
-    } else {
-      console.log(`Skipped sending Spotify info (SPOTIFY_ECHO_ENABLED=${env.SPOTIFY_ECHO_ENABLED})`);
     }
-    
   } catch (error) {
-    console.error('Error processing Spotify links:', error);
-    
+    console.error('Error processing links:', error);
+
     // Send error to Telegram if error channel is configured
     if (env.TELEGRAM_ERROR_CHANNEL) {
       try {
         const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
-        await telegramBot.sendMessage(env.TELEGRAM_ERROR_CHANNEL, `Error processing Spotify links: ${error.message}`);
+        await telegramBot.sendMessage(
+          env.TELEGRAM_ERROR_CHANNEL,
+          `Error processing links: ${error.message}`
+        );
       } catch (telegramError) {
         console.error('Failed to send error to Telegram:', telegramError);
       }
