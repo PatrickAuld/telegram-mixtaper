@@ -25,7 +25,6 @@
   },
   "dependencies": {
     "dotenv": "^17.2.2",
-    "jsdom": "^27.0.0",
     "open": "^10.2.0"
   }
 }

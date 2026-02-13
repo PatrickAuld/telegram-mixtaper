@@ -205,42 +205,6 @@ export class SpotifyAPI {
     }
   }
 
-  /**
-   * Get playlist information
-   */
-  async getPlaylistInfo(playlistId, accessToken) {
-    try {
-      const response = await fetch(`${this.baseURL}/playlists/${playlistId}`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to get playlist info: ${response.status}`);
-      }
-
-      const playlist = await response.json();
-      
-      return {
-        id: playlist.id,
-        name: playlist.name,
-        description: playlist.description,
-        public: playlist.public,
-        collaborative: playlist.collaborative,
-        tracks: {
-          total: playlist.tracks.total
-        },
-        external_urls: playlist.external_urls,
-        images: playlist.images
-      };
-
-    } catch (error) {
-      console.error('Error getting playlist info:', error);
-      return null;
-    }
-  }
 
   /**
    * Check if tracks already exist in playlist (to avoid duplicates)
