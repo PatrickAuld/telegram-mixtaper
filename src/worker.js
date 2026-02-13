@@ -128,10 +128,106 @@ async function handleSpotifyCallback(request, env) {
     console.error("Failed to send Telegram confirmation:", e);
   }
 
-  return new Response(
-    "Spotify linked. You can close this tab and go back to Telegram.",
-    { status: 200, headers: { "Content-Type": "text/plain" } },
-  );
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spotify linked</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 0;
+        padding: 32px 16px;
+        background: #0b0b0c;
+        color: #f4f4f5;
+      }
+      .card {
+        max-width: 560px;
+        margin: 0 auto;
+        background: #111114;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.5rem;
+        line-height: 1.2;
+      }
+      p {
+        margin: 0 0 16px;
+        line-height: 1.5;
+        color: rgba(244, 244, 245, 0.85);
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 999px;
+        background: rgba(29, 185, 84, 0.12);
+        border: 1px solid rgba(29, 185, 84, 0.35);
+        margin: 12px 0 18px;
+        font-weight: 600;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #1db954;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      a.btn {
+        display: inline-block;
+        text-decoration: none;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.06);
+        color: #f4f4f5;
+      }
+      a.btn:hover {
+        background: rgba(255, 255, 255, 0.10);
+      }
+      .fine {
+        font-size: 0.9rem;
+        color: rgba(244, 244, 245, 0.65);
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Spotify linked</h1>
+      <div class="pill"><span class="dot"></span>Success</div>
+      <p>
+        You can close this tab and go back to Telegram.
+      </p>
+      <p class="fine">
+        Tip: to unlink later, DM the bot and run <code>/unlink</code>.
+      </p>
+    </div>
+  </body>
+</html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      // Avoid caching OAuth results.
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 async function handleLinkCommand(message, env) {
