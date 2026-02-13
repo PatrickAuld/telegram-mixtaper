@@ -137,7 +137,19 @@ async function handleSpotifyCallback(request, env) {
 async function handleLinkCommand(message, env) {
   const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
   const chatId = message.chat.id;
+  const chatType = message.chat?.type;
   const telegramUserId = message.from?.id;
+
+  // Only allow linking via direct messages to avoid leaking the link/token flow
+  // to groups/channels.
+  if (chatType && chatType !== "private") {
+    await telegramBot.sendMessage(
+      chatId,
+      "For safety, Spotify linking only works in a direct message with the bot. Please DM me and run /link there.",
+      { reply_to_message_id: message.message_id },
+    );
+    return;
+  }
 
   if (!telegramUserId) {
     await telegramBot.sendMessage(
