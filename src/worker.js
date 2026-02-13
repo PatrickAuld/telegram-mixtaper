@@ -64,6 +64,16 @@ export default {
   },
 };
 
+function getRedirectUri(env, requestOrigin) {
+  const explicit = env.SPOTIFY_REDIRECT_URI;
+  if (explicit && String(explicit).trim().length > 0) {
+    return String(explicit).trim();
+  }
+
+  const base = (env.PUBLIC_BASE_URL || requestOrigin || "").replace(/\/+$/, "");
+  return `${base}/spotify/callback`;
+}
+
 async function handleSpotifyLinkStart(request, env) {
   const url = new URL(request.url);
   const telegramUserId = url.searchParams.get("tg_user_id");
@@ -73,8 +83,7 @@ async function handleSpotifyLinkStart(request, env) {
     return new Response("Missing tg_user_id or chat_id", { status: 400 });
   }
 
-  const baseUrl = env.PUBLIC_BASE_URL || url.origin;
-  const redirectUri = `${baseUrl}/spotify/callback`;
+  const redirectUri = getRedirectUri(env, url.origin);
 
   const tokenManager = new SpotifyTokenManager(env);
   const state = await createStateToken();
@@ -110,8 +119,7 @@ async function handleSpotifyCallback(request, env) {
     return new Response("Invalid or expired state", { status: 400 });
   }
 
-  const baseUrl = env.PUBLIC_BASE_URL || url.origin;
-  const redirectUri = `${baseUrl}/spotify/callback`;
+  const redirectUri = getRedirectUri(env, url.origin);
 
   const tokens = await exchangeCodeForTokens({ env, code, redirectUri });
 
@@ -170,6 +178,9 @@ async function handleLinkCommand(message, env) {
     return;
   }
 
+  // NOTE: Spotify redirect URIs must exactly match what is configured in the
+  // Spotify developer dashboard. If you see an "Invalid redirect URI" error,
+  // set SPOTIFY_REDIRECT_URI to the exact callback URL.
   const linkUrl = new URL("/spotify/link", baseUrl);
   linkUrl.searchParams.set("tg_user_id", String(telegramUserId));
   linkUrl.searchParams.set("chat_id", String(chatId));
