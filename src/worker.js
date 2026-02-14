@@ -6,6 +6,7 @@
 import { SpotifyTokenManager } from "./spotify-token-manager.js";
 import { TelegramBot } from "./telegram-bot.js";
 import { SpotifyAPI } from "./spotify-api.js";
+import { extractYouTubeMusicLinks, getYouTubeMusicTrackInfo } from "./youtube-music.js";
 import {
   createStateToken,
   exchangeCodeForTokens,
@@ -40,7 +41,6 @@ export default {
       if (request.method === "GET" && url.pathname === "/spotify/callback") {
         return await handleSpotifyCallback(request, env);
       }
-
       // Telegram webhook endpoint
       if (request.method === "POST" && url.pathname === "/webhook") {
         return await handleTelegramWebhook(request, env, ctx);
@@ -61,7 +61,7 @@ export default {
         },
       );
     }
-  },
+  }
 };
 
 async function handleSpotifyLinkStart(request, env) {
@@ -405,15 +405,22 @@ async function handleTelegramWebhook(request, env, ctx) {
     }
 
     const spotifyLinks = extractSpotifyLinks(text);
+    const ytLinks = extractYouTubeMusicLinks(text);
 
-    if (spotifyLinks.length === 0) {
+    if (spotifyLinks.length === 0 && ytLinks.length === 0) {
       return new Response("OK", { status: 200 });
     }
 
-    console.log(`Found ${spotifyLinks.length} Spotify links:`, spotifyLinks);
+    if (spotifyLinks.length > 0) {
+      console.log(`Found ${spotifyLinks.length} Spotify links:`, spotifyLinks);
+    }
 
-    // Process Spotify links
-    ctx.waitUntil(processSpotifyLinks(spotifyLinks, message, env));
+    if (ytLinks.length > 0) {
+      console.log(`Found ${ytLinks.length} YouTube links:`, ytLinks);
+    }
+
+    // Process links
+    ctx.waitUntil(processLinks({ spotifyLinks, ytLinks }, message, env));
 
     return new Response("OK", { status: 200 });
   } catch (error) {
@@ -490,9 +497,9 @@ async function resolveSpotifyShortLink(shortUrl) {
 }
 
 /**
- * Process Spotify links - add tracks to playlist and send content info
+ * Process Spotify + YouTube Music links.
  */
-async function processSpotifyLinks(spotifyLinks, message, env) {
+async function processLinks({ spotifyLinks, ytLinks }, message, env) {
   try {
     const tokenManager = new SpotifyTokenManager(env);
     const spotifyAPI = new SpotifyAPI(tokenManager);
@@ -515,7 +522,7 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
       accessToken = await tokenManager.getAccessToken();
     }
 
-    // Resolve short links to full URLs
+    // Resolve Spotify short links
     const resolvedLinks = [];
     for (const link of spotifyLinks) {
       if (link.isShortLink) {
@@ -542,6 +549,46 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
 
     const echoEnabled = env.SPOTIFY_ECHO_ENABLED === "true";
 
+    // Convert YouTube Music links → Spotify tracks
+    const ytTrackUris = [];
+    for (const link of ytLinks) {
+      const info = await getYouTubeMusicTrackInfo(link.url);
+      if (!info) {
+        console.error(`Could not extract track info from: ${link.url}`);
+        continue;
+      }
+
+      const match = await spotifyAPI.searchTrack(
+        { title: info.title, artist: info.artist },
+        accessToken
+      );
+
+      if (!match) {
+        console.log(`No Spotify match found for: ${info.artist ?? ''} ${info.title}`);
+        continue;
+      }
+
+      ytTrackUris.push(match.uri);
+
+      // Echo matched Spotify track
+      if (echoEnabled) {
+        try {
+          const contentInfo = await spotifyAPI.getTrackInfo(match.id, accessToken);
+          if (contentInfo) {
+            await telegramBot.sendSpotifyInfo(contentInfo, "track", message);
+          }
+        } catch (e) {
+          console.error("Error sending Spotify info for YT match:", e);
+        }
+      }
+    }
+
+    if (ytTrackUris.length > 0) {
+      await spotifyAPI.addTracksToPlaylist(ytTrackUris, accessToken, env);
+      console.log(`Added ${ytTrackUris.length} tracks from YouTube to playlist`);
+    }
+
+    // Echo for Spotify items (tracks/albums/playlists)
     if (echoEnabled) {
       for (const link of resolvedLinks) {
         try {
