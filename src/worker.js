@@ -304,6 +304,77 @@ async function handleUnlinkCommand(message, env) {
 /**
  * Handle incoming Telegram webhook
  */
+function getAdminAllowlist(env) {
+  const raw = String(env.ADMIN_TELEGRAM_USER_IDS ?? "").trim();
+  const ids = raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return new Set(ids);
+}
+
+async function handleAdminLinkedCommand(message, env) {
+  const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
+
+  const chatType = message.chat?.type;
+  const fromId = message.from?.id;
+
+  // DM only to avoid leaking user lists.
+  if (chatType && chatType !== "private") {
+    await telegramBot.sendMessage(
+      message.chat.id,
+      "This command only works in a direct message with the bot.",
+      { reply_to_message_id: message.message_id },
+    );
+    return;
+  }
+
+  const allow = getAdminAllowlist(env);
+  if (!fromId || !allow.has(String(fromId))) {
+    // Silent ignore for unauthorized users.
+    return;
+  }
+
+  const kv = env.SPOTIFY_TOKENS;
+  const keys = [];
+  let cursor = undefined;
+
+  // Paginate in case the list grows.
+  for (let page = 0; page < 20; page++) {
+    const res = await kv.list({ prefix: "spotify_user_oauth:", cursor });
+    for (const k of res.keys) {
+      keys.push(k.name);
+    }
+    if (!res.list_complete) {
+      cursor = res.cursor;
+      continue;
+    }
+    break;
+  }
+
+  const ids = keys
+    .map((k) => k.replace(/^spotify_user_oauth:/, ""))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  const count = ids.length;
+  const preview = ids.slice(0, 50);
+
+  const lines = [
+    `Linked Spotify users: ${count}`,
+    "",
+    ...preview.map((id) => `- ${id}`),
+  ];
+
+  if (count > preview.length) {
+    lines.push("", `…and ${count - preview.length} more`);
+  }
+
+  await telegramBot.sendMessage(message.chat.id, lines.join("\n"), {
+    reply_to_message_id: message.message_id,
+  });
+}
+
 async function handleTelegramWebhook(request, env, ctx) {
   try {
     const update = await request.json();
@@ -318,6 +389,11 @@ async function handleTelegramWebhook(request, env, ctx) {
     const text = message.text.trim();
 
     // Commands
+    if (text === "/admin_linked") {
+      ctx.waitUntil(handleAdminLinkedCommand(message, env));
+      return new Response("OK", { status: 200 });
+    }
+
     if (text === "/link" || text === "/linkspotify") {
       ctx.waitUntil(handleLinkCommand(message, env));
       return new Response("OK", { status: 200 });
