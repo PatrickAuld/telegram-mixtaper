@@ -313,6 +313,77 @@ function getAdminAllowlist(env) {
   return new Set(ids);
 }
 
+function isoDay(d = new Date()) {
+  // YYYY-MM-DD in UTC
+  return d.toISOString().slice(0, 10);
+}
+
+function userDailyKey(telegramUserId, day) {
+  return `metrics:user:${telegramUserId}:${day}`;
+}
+
+function userSummaryKey(telegramUserId) {
+  return `metrics:user:${telegramUserId}:summary`;
+}
+
+function userLastLinksKey(telegramUserId) {
+  return `metrics:user:${telegramUserId}:last_links`;
+}
+
+async function recordUserSubmissions({ env, telegramUserId, links }) {
+  const kv = env.SPOTIFY_TOKENS;
+  const day = isoDay();
+  const now = new Date().toISOString();
+
+  const spotifyCount = links.filter((l) => l.kind === "spotify").length;
+  const youtubeCount = links.filter((l) => l.kind === "youtube").length;
+
+  const dailyKey = userDailyKey(telegramUserId, day);
+  const daily = (await kv.get(dailyKey, "json")) || {
+    day,
+    total: 0,
+    spotify: 0,
+    youtube: 0,
+    updated_at: now,
+  };
+
+  daily.total += links.length;
+  daily.spotify += spotifyCount;
+  daily.youtube += youtubeCount;
+  daily.updated_at = now;
+
+  await kv.put(dailyKey, JSON.stringify(daily), { expirationTtl: 90 * 24 * 3600 });
+
+  const summaryKey = userSummaryKey(telegramUserId);
+  const summary = (await kv.get(summaryKey, "json")) || {
+    total: 0,
+    spotify: 0,
+    youtube: 0,
+    first_seen_at: now,
+    updated_at: now,
+  };
+
+  summary.total += links.length;
+  summary.spotify += spotifyCount;
+  summary.youtube += youtubeCount;
+  summary.updated_at = now;
+
+  await kv.put(summaryKey, JSON.stringify(summary));
+
+  const lastKey = userLastLinksKey(telegramUserId);
+  const last = (await kv.get(lastKey, "json")) || { links: [] };
+
+  const newEntries = links.map((l) => ({
+    at: now,
+    kind: l.kind,
+    url: l.url,
+  }));
+
+  last.links = [...newEntries, ...(last.links || [])].slice(0, 20);
+
+  await kv.put(lastKey, JSON.stringify(last), { expirationTtl: 90 * 24 * 3600 });
+}
+
 async function handleAdminLinkedCommand(message, env) {
   const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
 
@@ -375,6 +446,82 @@ async function handleAdminLinkedCommand(message, env) {
   });
 }
 
+async function handleStatsCommand(message, rawText, env) {
+  const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
+
+  const chatType = message.chat?.type;
+  const fromId = message.from?.id;
+
+  // DM only: stats are private.
+  if (chatType && chatType !== "private") {
+    await telegramBot.sendMessage(
+      message.chat.id,
+      "Stats are only available in a direct message with the bot.",
+      { reply_to_message_id: message.message_id },
+    );
+    return;
+  }
+
+  const parts = rawText.split(/\s+/).filter(Boolean);
+  const targetIdRaw = parts[1] ?? null;
+
+  let targetId = fromId ? String(fromId) : null;
+  if (targetIdRaw) {
+    const allow = getAdminAllowlist(env);
+    if (fromId && allow.has(String(fromId))) {
+      targetId = targetIdRaw;
+    } else {
+      // Non-admins can only view their own stats.
+      await telegramBot.sendMessage(
+        message.chat.id,
+        "You can only view your own stats.",
+        { reply_to_message_id: message.message_id },
+      );
+      return;
+    }
+  }
+
+  if (!targetId) {
+    await telegramBot.sendMessage(message.chat.id, "Missing user id.", {
+      reply_to_message_id: message.message_id,
+    });
+    return;
+  }
+
+  const kv = env.SPOTIFY_TOKENS;
+  const summary = await kv.get(userSummaryKey(targetId), "json");
+  const last = await kv.get(userLastLinksKey(targetId), "json");
+
+  const day = isoDay();
+  const today = await kv.get(userDailyKey(targetId, day), "json");
+
+  const total = summary?.total ?? 0;
+  const spotify = summary?.spotify ?? 0;
+
+  const todayTotal = today?.total ?? 0;
+  const todaySpotify = today?.spotify ?? 0;
+
+  const lines = [
+    `Stats for ${targetId}`,
+    "",
+    `Today: ${todayTotal} (spotify ${todaySpotify})`,
+    `All time: ${total} (spotify ${spotify})`,
+  ];
+
+  const links = (last?.links ?? []).slice(0, 10);
+  if (links.length > 0) {
+    lines.push("", "Recent:");
+    for (const l of links) {
+      lines.push(`- [${l.kind}] ${l.url}`);
+    }
+  }
+
+  await telegramBot.sendMessage(message.chat.id, lines.join("\n"), {
+    reply_to_message_id: message.message_id,
+    disable_web_page_preview: true,
+  });
+}
+
 async function handleTelegramWebhook(request, env, ctx) {
   try {
     const update = await request.json();
@@ -391,6 +538,11 @@ async function handleTelegramWebhook(request, env, ctx) {
     // Commands
     if (text === "/admin_linked") {
       ctx.waitUntil(handleAdminLinkedCommand(message, env));
+      return new Response("OK", { status: 200 });
+    }
+
+    if (text.startsWith("/stats")) {
+      ctx.waitUntil(handleStatsCommand(message, text, env));
       return new Response("OK", { status: 200 });
     }
 
@@ -499,6 +651,20 @@ async function processSpotifyLinks(spotifyLinks, message, env) {
     const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
 
     const telegramUserId = message?.from?.id;
+
+    // Record submission metrics (best effort).
+    if (telegramUserId) {
+      try {
+        await recordUserSubmissions({
+          env,
+          telegramUserId: String(telegramUserId),
+          links: spotifyLinks.map((l) => ({ kind: "spotify", url: l.url })),
+        });
+      } catch (e) {
+        console.error("Failed to record submission metrics:", e);
+      }
+    }
+
     let accessToken;
 
     if (telegramUserId) {
