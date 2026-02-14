@@ -84,6 +84,44 @@ export function extractYouTubeMusicLinks(text) {
  */
 export async function getYouTubeMusicTrackInfo(url) {
   try {
+    // First try oEmbed (often works even when HTML is blocked/challenged).
+    // https://developers.google.com/youtube/v3/guides/oembed
+    try {
+      const oembed = new URL("https://www.youtube.com/oembed");
+      oembed.searchParams.set("url", url);
+      oembed.searchParams.set("format", "json");
+
+      const o = await fetch(oembed.toString(), {
+        headers: { "User-Agent": "telegram-mixtaper/1.0" },
+      });
+
+      if (o.ok) {
+        const data = await o.json();
+        const titleText = typeof data?.title === "string" ? data.title : "";
+        const cleaned = titleText.trim();
+
+        if (cleaned) {
+          // Heuristic: split "Artist - Title" if it looks like that.
+          const parts = cleaned
+            .split(" - ")
+            .map((p) => p.trim())
+            .filter(Boolean);
+
+          if (parts.length >= 2) {
+            return { artist: parts[0], title: parts.slice(1).join(" - ") };
+          }
+
+          return { artist: null, title: cleaned };
+        }
+      } else {
+        console.log(
+          `YouTube oEmbed failed (${o.status}). Falling back to HTML fetch.`,
+        );
+      }
+    } catch (e) {
+      console.log("YouTube oEmbed error; falling back to HTML fetch:", e);
+    }
+
     const res = await fetch(url, {
       headers: {
         // Some UA helps avoid minimal responses.
@@ -92,7 +130,8 @@ export async function getYouTubeMusicTrackInfo(url) {
     });
 
     if (!res.ok) {
-      throw new Error(`YouTube fetch failed: ${res.status}`);
+      const snippet = (await res.text()).slice(0, 200);
+      throw new Error(`YouTube fetch failed: ${res.status} (${snippet})`);
     }
 
     const html = await res.text();

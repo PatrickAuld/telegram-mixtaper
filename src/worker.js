@@ -476,11 +476,15 @@ async function processLinks({ spotifyLinks, ytLinks }, message, env) {
     // Convert YouTube Music links → Spotify tracks
     const ytTrackUris = [];
     for (const link of ytLinks) {
+      console.log(`Fetching YouTube Music track info: ${link.url}`);
       const info = await getYouTubeMusicTrackInfo(link.url);
       if (!info) {
         console.error(`Could not extract track info from: ${link.url}`);
         continue;
       }
+      console.log(
+        `YouTube info: artist=${info.artist ?? ""} title=${info.title ?? ""}`,
+      );
 
       const match = await spotifyAPI.searchTrack(
         { title: info.title, artist: info.artist },
