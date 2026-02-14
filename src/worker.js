@@ -6,13 +6,23 @@
 import { SpotifyTokenManager } from "./spotify-token-manager.js";
 import { TelegramBot } from "./telegram-bot.js";
 import { SpotifyAPI } from "./spotify-api.js";
-import { extractYouTubeMusicLinks, getYouTubeMusicTrackInfo } from "./youtube-music.js";
+import {
+  extractYouTubeMusicLinks,
+  getYouTubeMusicTrackInfo,
+} from "./youtube-music.js";
 import {
   createStateToken,
   exchangeCodeForTokens,
   spotifyAuthorizeUrl,
   SPOTIFY_USER_SCOPES,
 } from "./spotify-user-auth.js";
+import { YouTubeTokenManager } from "./youtube-token-manager.js";
+import {
+  createStateToken as createYouTubeStateToken,
+  exchangeCodeForTokens as exchangeYouTubeCodeForTokens,
+  youtubeAuthorizeUrl,
+  YOUTUBE_SCOPES,
+} from "./youtube-user-auth.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -40,6 +50,15 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/spotify/callback") {
         return await handleSpotifyCallback(request, env);
+      }
+
+      // YouTube OAuth endpoints (per Telegram user)
+      if (request.method === "GET" && url.pathname === "/youtube/link") {
+        return await handleYouTubeLinkStart(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/youtube/callback") {
+        return await handleYouTubeCallback(request, env);
       }
       // Telegram webhook endpoint
       if (request.method === "POST" && url.pathname === "/webhook") {
@@ -228,6 +247,156 @@ async function handleSpotifyCallback(request, env) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+async function handleYouTubeLinkStart(request, env) {
+  const url = new URL(request.url);
+  const telegramUserId = url.searchParams.get("tg_user_id");
+  const chatId = url.searchParams.get("chat_id");
+
+  if (!telegramUserId || !chatId) {
+    return new Response("Missing tg_user_id or chat_id", { status: 400 });
+  }
+
+  const baseUrl = env.PUBLIC_BASE_URL || url.origin;
+  const redirectUri = `${baseUrl}/youtube/callback`;
+
+  const tokenManager = new YouTubeTokenManager(env);
+  const state = await createYouTubeStateToken();
+
+  await tokenManager.storeOAuthState(state, {
+    telegramUserId,
+    chatId,
+  });
+
+  const authUrl = youtubeAuthorizeUrl({
+    clientId: env.GOOGLE_CLIENT_ID,
+    redirectUri,
+    state,
+    scopes: YOUTUBE_SCOPES,
+  });
+
+  return Response.redirect(authUrl, 302);
+}
+
+async function handleYouTubeCallback(request, env) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+
+  if (!code || !state) {
+    return new Response("Missing code or state", { status: 400 });
+  }
+
+  const tokenManager = new YouTubeTokenManager(env);
+  const payload = await tokenManager.consumeOAuthState(state);
+
+  if (!payload) {
+    return new Response("Invalid or expired state", { status: 400 });
+  }
+
+  const baseUrl = env.PUBLIC_BASE_URL || url.origin;
+  const redirectUri = `${baseUrl}/youtube/callback`;
+
+  const tokens = await exchangeYouTubeCodeForTokens({ env, code, redirectUri });
+
+  await tokenManager.setTelegramUserTokens(payload.telegramUserId, tokens);
+
+  // Notify the user back in Telegram.
+  try {
+    const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
+    await telegramBot.sendMessage(
+      payload.chatId,
+      "✅ YouTube Music linked. (Next: we’ll let you pick a playlist to add to.)",
+    );
+  } catch (e) {
+    console.error("Failed to send Telegram confirmation:", e);
+  }
+
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube linked</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 32px 16px; background: #0b0b0c; color: #f4f4f5; }
+      .card { max-width: 560px; margin: 0 auto; background: #111114; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+      h1 { margin: 0 0 8px; font-size: 1.5rem; line-height: 1.2; }
+      p { margin: 0 0 16px; line-height: 1.5; color: rgba(244,244,245,0.85); }
+      .pill { display: inline-flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 999px; background: rgba(37, 99, 235, 0.12); border: 1px solid rgba(37, 99, 235, 0.35); margin: 12px 0 18px; font-weight: 600; }
+      .dot { width: 10px; height: 10px; border-radius: 999px; background: #2563eb; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>YouTube linked</h1>
+      <div class="pill"><span class="dot"></span>Success</div>
+      <p>You can close this tab and go back to Telegram.</p>
+    </div>
+  </body>
+</html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function handleLinkYouTubeMusicCommand(message, env) {
+  const telegramBot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
+  const chatId = message.chat.id;
+  const chatType = message.chat?.type;
+  const telegramUserId = message.from?.id;
+
+  if (chatType && chatType !== "private") {
+    await telegramBot.sendMessage(
+      chatId,
+      "For safety, YouTube Music linking only works in a direct message with the bot. Please DM me and run /linkyoutubemusic there.",
+      { reply_to_message_id: message.message_id },
+    );
+    return;
+  }
+
+  if (!telegramUserId) {
+    await telegramBot.sendMessage(chatId, "Could not identify your Telegram user id.", {
+      reply_to_message_id: message.message_id,
+    });
+    return;
+  }
+
+  const baseUrl = env.PUBLIC_BASE_URL;
+  if (!baseUrl) {
+    await telegramBot.sendMessage(
+      chatId,
+      "Missing PUBLIC_BASE_URL configuration on the server.",
+      { reply_to_message_id: message.message_id },
+    );
+    return;
+  }
+
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+    await telegramBot.sendMessage(
+      chatId,
+      "YouTube linking is not configured yet (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET).",
+      { reply_to_message_id: message.message_id },
+    );
+    return;
+  }
+
+  const linkUrl = new URL("/youtube/link", baseUrl);
+  linkUrl.searchParams.set("tg_user_id", String(telegramUserId));
+  linkUrl.searchParams.set("chat_id", String(chatId));
+
+  await telegramBot.sendMessage(
+    chatId,
+    `Link your YouTube account: ${linkUrl.toString()}`,
+    { reply_to_message_id: message.message_id },
+  );
 }
 
 async function handleLinkCommand(message, env) {
@@ -548,6 +717,11 @@ async function handleTelegramWebhook(request, env, ctx) {
 
     if (text === "/link" || text === "/linkspotify") {
       ctx.waitUntil(handleLinkCommand(message, env));
+      return new Response("OK", { status: 200 });
+    }
+
+    if (text === "/linkyoutubemusic" || text === "/linkyoutube") {
+      ctx.waitUntil(handleLinkYouTubeMusicCommand(message, env));
       return new Response("OK", { status: 200 });
     }
 
