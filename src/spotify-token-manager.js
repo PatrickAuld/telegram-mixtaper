@@ -8,96 +8,146 @@ export class SpotifyTokenManager {
     this.kv = env.SPOTIFY_TOKENS;
   }
 
+  userTokenKey(telegramUserId) {
+    return `spotify_user_oauth:${telegramUserId}`;
+  }
+
+  stateKey(state) {
+    return `spotify_oauth_state:${state}`;
+  }
+
   /**
    * Get a valid access token, refreshing if necessary
    */
   async getAccessToken() {
+    return this.getAccessTokenForKey("spotify_oauth", {
+      refreshTokenFallback: this.env.SPOTIFY_REFRESH_TOKEN,
+      envAccessTokenFallback: this.env.SPOTIFY_ACCESS_TOKEN,
+    });
+  }
+
+  async getAccessTokenForTelegramUser(telegramUserId) {
+    return this.getAccessTokenForKey(this.userTokenKey(telegramUserId), {
+      // Per-user tokens have no env fallback.
+      refreshTokenFallback: null,
+      envAccessTokenFallback: null,
+    });
+  }
+
+  /**
+   * Get a valid access token for an arbitrary KV key.
+   */
+  async getAccessTokenForKey(
+    kvKey,
+    { refreshTokenFallback, envAccessTokenFallback },
+  ) {
     try {
-      // Try to get existing token from KV
-      const tokenData = await this.kv.get('spotify_oauth', 'json');
-      
+      const tokenData = await this.kv.get(kvKey, "json");
+
       if (tokenData && !this.isTokenExpired(tokenData)) {
-        console.log('Using existing valid token');
         return tokenData.access_token;
       }
-      
-      // Token is expired or doesn't exist, need to refresh
-      const refreshToken = tokenData?.refresh_token || this.env.SPOTIFY_REFRESH_TOKEN;
-      
+
+      const refreshToken = tokenData?.refresh_token || refreshTokenFallback;
       if (!refreshToken) {
-        throw new Error('No refresh token available');
+        throw new Error("No refresh token available");
       }
-      
-      console.log('Refreshing expired token');
-      return await this.refreshAccessToken(refreshToken);
-      
+
+      return await this.refreshAccessToken(refreshToken, kvKey);
     } catch (error) {
-      console.error('Error getting access token:', error);
-      
-      // Fallback to environment variable token (for initial setup)
-      if (this.env.SPOTIFY_ACCESS_TOKEN) {
-        console.log('Falling back to environment token');
-        return this.env.SPOTIFY_ACCESS_TOKEN;
+      console.error(`Error getting access token (key=${kvKey}):`, error);
+
+      if (envAccessTokenFallback) {
+        console.log("Falling back to environment token");
+        return envAccessTokenFallback;
       }
-      
-      throw new Error(`Failed to get access token: ${error.message}`);
+
+      throw new Error(
+        `Failed to get access token (key=${kvKey}): ${error.message}`,
+      );
     }
   }
 
   /**
    * Refresh the access token using the refresh token
    */
-  async refreshAccessToken(refreshToken) {
+  async refreshAccessToken(refreshToken, kvKey = "spotify_oauth") {
     try {
       const clientId = this.env.SPOTIFY_CLIENT_ID;
       const clientSecret = this.env.SPOTIFY_CLIENT_SECRET;
-      
+
       if (!clientId || !clientSecret) {
-        throw new Error('Spotify client credentials not configured');
+        throw new Error("Spotify client credentials not configured");
       }
-      
-      // Prepare Basic Auth header
+
       const authHeader = btoa(`${clientId}:${clientSecret}`);
-      
-      const response = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
+
+      const response = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
         headers: {
-          'Authorization': `Basic ${authHeader}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
+          Authorization: `Basic ${authHeader}`,
+          "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken
-        })
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        }),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Token refresh failed: ${response.status} - ${errorText}`);
       }
-      
+
       const tokens = await response.json();
-      
-      // Calculate expiration time
-      const expiresAt = Date.now() + (tokens.expires_in * 1000);
-      
-      // Store new tokens in KV
+      const expiresAt = Date.now() + tokens.expires_in * 1000;
+
       const tokenData = {
         access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || refreshToken, // Use new refresh token if provided
+        refresh_token: tokens.refresh_token || refreshToken,
         expires_at: expiresAt,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
-      
-      await this.kv.put('spotify_oauth', JSON.stringify(tokenData));
-      console.log('Stored refreshed token in KV');
-      
+
+      await this.kv.put(kvKey, JSON.stringify(tokenData));
       return tokens.access_token;
-      
     } catch (error) {
-      console.error('Error refreshing token:', error);
+      console.error("Error refreshing token:", error);
       throw error;
     }
+  }
+
+  async setTelegramUserTokens(telegramUserId, tokenResponse) {
+    const expiresAt = Date.now() + tokenResponse.expires_in * 1000;
+    const tokenData = {
+      access_token: tokenResponse.access_token,
+      refresh_token: tokenResponse.refresh_token,
+      expires_at: expiresAt,
+      updated_at: new Date().toISOString(),
+    };
+
+    await this.kv.put(
+      this.userTokenKey(telegramUserId),
+      JSON.stringify(tokenData),
+    );
+  }
+
+  async unlinkTelegramUser(telegramUserId) {
+    await this.kv.delete(this.userTokenKey(telegramUserId));
+  }
+
+  async storeOAuthState(state, payload) {
+    // expire after 10 minutes
+    await this.kv.put(this.stateKey(state), JSON.stringify(payload), {
+      expirationTtl: 10 * 60,
+    });
+  }
+
+  async consumeOAuthState(state) {
+    const key = this.stateKey(state);
+    const payload = await this.kv.get(key, "json");
+    if (payload) await this.kv.delete(key);
+    return payload;
   }
 
   /**
