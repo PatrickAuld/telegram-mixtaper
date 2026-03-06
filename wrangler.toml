@@ -17,7 +17,7 @@ kv_namespaces = [
 # Environment variables (non-secret)
 [vars]
 SPOTIFY_USER_ID = "patrick.auld"
-SPOTIFY_PLAYLIST_ID = "30VMMS6lOggdRImCEoWAxl"
+SPOTIFY_PLAYLIST_ID = "1QdeYrjrfjnIMemXkYGfkF"
 SPOTIFY_ECHO_ENABLED = false
 
 # Secrets (use: wrangler secret put <name>)
